@@ -1,11 +1,11 @@
 # Simple.Elasticsearch
 net core 对Elasticsearch 扩展，使代码书写更简洁、调用更方便，操作更简单
 1、ElasticSearchIndex特性介绍
-IndexName         --索引名称
-AliasNames        --别名
-ReplicasCount    --分片数量
-ShardsCount      --副本数量
-Format                --索引名格式（默认yyyy_MM）
+ IndexName         --索引名称
+ AliasNames        --别名
+ ReplicasCount    --分片数量
+ ShardsCount      --副本数量
+ Format                --索引名格式（默认yyyy_MM）
 
 es实体必须继承IDocument，并标记添加ElasticSearchIndex
 
