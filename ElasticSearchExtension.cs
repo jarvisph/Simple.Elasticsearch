@@ -1042,12 +1042,14 @@ namespace Simple.Elasticsearch
         /// <param name="query"></param>
         /// <param name="fields"></param>
         /// <returns></returns>
-        public static Func<SearchDescriptor<TDocument>, ISearchRequest> Select<TDocument>(this Func<SearchDescriptor<TDocument>, ISearchRequest> query, params Expression<Func<TDocument, object>>[] fields) where TDocument : class, IDocument
+        public static Func<SearchDescriptor<TDocument>, ISearchRequest> Select<TDocument>(this Func<SearchDescriptor<TDocument>, ISearchRequest> search, params Expression<Func<TDocument, object>>[] fields) where TDocument : class, IDocument
         {
-            if (query == null) throw new NullReferenceException();
+            if (search == null) throw new NullReferenceException();
             return (s) =>
             {
-                return s.Select(fields);
+                s.Select(fields);
+                search.Invoke(s);
+                return s;
             };
         }
         /// <summary>
