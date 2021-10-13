@@ -67,7 +67,12 @@ namespace Simple.Elasticsearch
                 elasticsearch.SetIndexTime(DateTime.Now);
             }
             client.WhenNotExistsAddIndex<TDocument>(elasticsearch);
-            return client.Index(new IndexRequest<TDocument>(document, elasticsearch.IndexName)).IsValid;
+            IndexResponse response = client.Index(new IndexRequest<TDocument>(document, elasticsearch.IndexName));
+            if (!response.IsValid)
+            {
+                throw response.OriginalException;
+            }
+            return response.IsValid;
         }
 
         /// <summary>
@@ -92,7 +97,12 @@ namespace Simple.Elasticsearch
             }
             //检查是否已经创建索引
             client.WhenNotExistsAddIndex<TDocument>(elasticsearch);
-            return client.IndexMany(documents, elasticsearch.IndexName).IsValid;
+            BulkResponse response = client.IndexMany(documents, elasticsearch.IndexName);
+            if (!response.IsValid)
+            {
+                throw response.OriginalException;
+            }
+            return response.IsValid;
         }
 
 
@@ -121,7 +131,12 @@ namespace Simple.Elasticsearch
                     return selector.Invoke(s.Index(indexname));
                 };
             }
-            return client.DeleteByQuery(action).IsValid;
+            DeleteByQueryResponse response = client.DeleteByQuery(action);
+            if (!response.IsValid)
+            {
+                throw response.OriginalException;
+            }
+            return response.IsValid;
         }
 
         /// <summary>
@@ -863,18 +878,18 @@ namespace Simple.Elasticsearch
             };
         }
         /// <summary>
-        /// 根据单个字段分组
+        /// 根据字段分组
         /// </summary>
         /// <typeparam name="TDocument"></typeparam>
-        /// <typeparam name="TValue"></typeparam>
+        /// <typeparam name="Key"></typeparam>
         /// <param name="search"></param>
-        /// <param name="field"></param>
+        /// <param name="keySelector"></param>
         /// <returns></returns>
-        public static Func<SearchDescriptor<TDocument>, ISearchRequest> GroupBy<TDocument, TValue>(this Func<SearchDescriptor<TDocument>, ISearchRequest> search, Expression<Func<TDocument, TValue>> field) where TDocument : class, IDocument
+        public static Func<SearchDescriptor<TDocument>, ISearchRequest> GroupBy<TDocument, Key>(this Func<SearchDescriptor<TDocument>, ISearchRequest> search, Expression<Func<TDocument, Key>> keySelector) where TDocument : class, IDocument
         {
             return (s) =>
             {
-                s.Size(0).Aggregations(GroupBy(field));
+                s.Size(0).Aggregations(Aggregation(keySelector));
                 search.Invoke(s);
                 return s;
             };
@@ -895,30 +910,45 @@ namespace Simple.Elasticsearch
                 return s;
             };
         }
+
+        /// <summary>
+        /// 分组
+        /// </summary>
+        /// <typeparam name="TDocument"></typeparam>
+        /// <param name="search"></param>
+        /// <param name="keySelector">条件</param>
+        /// <param name="keySelector">结果</param>
+        /// <returns></returns>
+        public static Func<SearchDescriptor<TDocument>, ISearchRequest> GroupBy<TDocument>(this Func<SearchDescriptor<TDocument>, ISearchRequest> search, Expression<Func<TDocument, object>> keySelector, Expression<Func<TDocument, object>> selector) where TDocument : class, IDocument
+        {
+            List<string> _script = new List<string>();
+            Type type = typeof(TDocument);
+            foreach (PropertyInfo property in keySelector.GetPropertys())
+            {
+                PropertyInfo propertyInfo = type.GetProperty(property.Name);
+                if (propertyInfo == null) continue;
+                string? fieldname = propertyInfo.GetFieldName();
+                if (string.IsNullOrWhiteSpace(fieldname)) continue;
+                _script.Add(fieldname);
+            }
+            return search.GroupBy(string.Join(",", _script), keySelector);
+        }
+
         /// <summary>
         /// 聚合
         /// </summary>
         /// <typeparam name="TDocument"></typeparam>
-        /// <typeparam name="TValue"></typeparam>
+        /// <typeparam name="Key"></typeparam>
         /// <param name="search"></param>
         /// <param name="script"></param>
-        /// <param name="fields"></param>
+        /// <param name="keySelector"></param>
         /// <returns></returns>
-        public static Func<SearchDescriptor<TDocument>, ISearchRequest> GroupBy<TDocument, TValue>(this Func<SearchDescriptor<TDocument>, ISearchRequest> search, string script, params Expression<Func<TDocument, TValue>>[] fields) where TDocument : class, IDocument
+        public static Func<SearchDescriptor<TDocument>, ISearchRequest> GroupBy<TDocument, Key>(this Func<SearchDescriptor<TDocument>, ISearchRequest> search, string script, Expression<Func<TDocument, Key>> keySelector) where TDocument : class, IDocument
         {
             IAggregationContainer group(AggregationContainerDescriptor<TDocument> aggs)
             {
-                string[] group_field = script.GetArray<string>();
-                string _script = string.Empty;
-                for (int i = 0; i < group_field.Length; i++)
-                {
-                    _script += "doc['" + group_field[i] + "'].value";
-                    if (i + 1 < group_field.Length)
-                    {
-                        _script += "+'-'+";
-                    }
-                }
-                return aggs.Terms("group_by_script", t => t.Script(_script).Aggregations(GroupBy(fields)));
+                string[] array = script.GetArray<string>().Select(c => $"doc['{c}'].value").ToArray();
+                return aggs.Terms("group_by_script", t => t.Script(string.Join("+'-'+", array)).Aggregations(Aggregation(keySelector)));
             };
             return (s) =>
             {
@@ -929,100 +959,102 @@ namespace Simple.Elasticsearch
         }
 
         /// <summary>
-        /// 聚合（聚合指定特性Aggregate）
+        /// 组装聚合的字段
         /// </summary>
         /// <typeparam name="TDocument"></typeparam>
-        /// <param name="search"></param>
+        /// <typeparam name="Key"></typeparam>
+        /// <param name="keySelector"></param>
         /// <returns></returns>
-        public static Func<SearchDescriptor<TDocument>, ISearchRequest> GroupBy<TDocument, TValue>(this Func<SearchDescriptor<TDocument>, ISearchRequest> search, params Expression<Func<TDocument, TValue>>[] fields) where TDocument : class, IDocument
-        {
-            return (s) =>
-            {
-                s.Size(0).Aggregations(GroupBy(fields));
-                search.Invoke(s);
-                return s;
-            };
-        }
-        /// <summary>
-        /// 内部组装聚合条件
-        /// </summary>
-        /// <typeparam name="TDocument"></typeparam>
-        /// <typeparam name="TValue"></typeparam>
-        /// <param name="fields"></param>
-        /// <returns></returns>
-        private static Func<AggregationContainerDescriptor<TDocument>, IAggregationContainer> GroupBy<TDocument, TValue>(params Expression<Func<TDocument, TValue>>[] fields) where TDocument : class, IDocument
+        private static Func<AggregationContainerDescriptor<TDocument>, IAggregationContainer> Aggregation<TDocument, Key>(Expression<Func<TDocument, Key>> keySelector) where TDocument : class, IDocument
         {
             return (s) =>
             {
                 Type type = typeof(TDocument);
-                foreach (var field in fields)
+                foreach (var property in keySelector.GetPropertys())
                 {
-                    PropertyInfo property = field.ToPropertyInfo();
                     if (property == null) continue;
-                    property = type.GetProperty(property.Name);
-                    AggregateAttribute aggregate = property.GetAttribute<AggregateAttribute>();
-                    string fieldname = property.GetFieldName();
-                    if (aggregate == null) { continue; }
-                    else if (aggregate.Type == AggregateType.Sum)
+                    var propertyinfo = type.GetProperty(property.Name);
+                    AggregateAttribute? aggregate = propertyinfo.GetAttribute<AggregateAttribute>();
+                    if (aggregate == null) continue;
+                    string? fieldname = aggregate.Name ?? propertyinfo.GetFieldName();
+                    if (fieldname == null) continue;
+                    if (aggregate.Type == AggregateType.Sum)
                     {
-                        s.Sum(aggregate.Name ?? fieldname, c => c.Field(field));
+                        s.Sum(fieldname, c => c.Field(fieldname));
                     }
                     else if (aggregate.Type == AggregateType.Average)
                     {
-                        s.Average(aggregate.Name ?? fieldname, c => c.Field(field));
+                        s.Average(fieldname, c => c.Field(fieldname));
                     }
                     else if (aggregate.Type == AggregateType.Count)
                     {
-                        s.ValueCount(aggregate.Name ?? fieldname, c => c.Field(field));
+                        s.ValueCount(fieldname, c => c.Field(fieldname));
                     }
                     else if (aggregate.Type == AggregateType.Max)
                     {
-                        s.Max(aggregate.Name ?? fieldname, c => c.Field(field));
+                        s.Max(fieldname, c => c.Field(fieldname));
                     }
                     else if (aggregate.Type == AggregateType.Min)
                     {
-                        s.Min(aggregate.Name ?? fieldname, c => c.Field(field));
+                        s.Min(fieldname, c => c.Field(fieldname));
                     }
                 }
                 return s;
             };
         }
+
         /// <summary>
-        /// 时间聚合（需指定聚合类型）
+        /// 按日期分组（默认按天）
         /// </summary>
         /// <typeparam name="TDocument"></typeparam>
-        /// <typeparam name="TValue"></typeparam>
-        /// <param name="search">查询条件</param>
-        /// <param name="interval">聚合格式</param>
-        /// <param name="condition">聚合条件</param>
-        /// <param name="script">聚合条件字段，多字段逗号分隔</param>
-        /// <param name="fields">聚合内容字段</param>
+        /// <param name="search"></param>
+        /// <param name="keySelector"></param>
         /// <returns></returns>
-        public static Func<SearchDescriptor<TDocument>, ISearchRequest> GroupByDate<TDocument, TValue>(this Func<SearchDescriptor<TDocument>, ISearchRequest> search, DateInterval interval, Expression<Func<TDocument, DateTime>> condition, string script, params Expression<Func<TDocument, TValue>>[] fields) where TDocument : class, IDocument
+        public static Func<SearchDescriptor<TDocument>, ISearchRequest> GroupByDate<TDocument>(this Func<SearchDescriptor<TDocument>, ISearchRequest> search, Expression<Func<TDocument, object>> keySelector, Expression<Func<TDocument, object>> selector) where TDocument : class, IDocument
         {
-            string fieldName = condition.GetFieldName();
-            if (string.IsNullOrWhiteSpace(fieldName)) throw new NullReferenceException("Group By FieldName IS NULL");
-            IAggregationContainer group(AggregationContainerDescriptor<TDocument> aggs)
+            return search.GroupByDate(DateInterval.Day, keySelector, selector);
+        }
+        /// <summary>
+        /// 指定聚合方式
+        /// </summary>
+        /// <typeparam name="TDocument"></typeparam>
+        /// <param name="search"></param>
+        /// <param name="interval"></param>
+        /// <param name="keySelector"></param>
+        /// <returns></returns>
+        /// <exception cref="NullReferenceException"></exception>
+        public static Func<SearchDescriptor<TDocument>, ISearchRequest> GroupByDate<TDocument>(this Func<SearchDescriptor<TDocument>, ISearchRequest> search, DateInterval interval, Expression<Func<TDocument, object>> keySelector, Expression<Func<TDocument, object>> selector) where TDocument : class, IDocument
+        {
+            List<string> _script = new List<string>();
+            Type type = typeof(TDocument);
+            //时间对象字段
+            string? datefield = string.Empty;
+            foreach (PropertyInfo property in keySelector.GetPropertys())
             {
-                string[] group_field = script.GetArray<string>();
-                string _script = string.Empty;
-                for (int i = 0; i < group_field.Length; i++)
+                PropertyInfo propertyInfo = type.GetProperty(property.Name);
+                if (propertyInfo == null) continue;
+                string? fieldname = propertyInfo.GetFieldName();
+                if (propertyInfo.HasAttribute<DateAttribute>())
                 {
-                    _script += "doc['" + group_field[i] + "'].value";
-                    if (i + 1 < group_field.Length)
-                    {
-                        _script += "+'-'+";
-                    }
+                    datefield = fieldname;
+                    continue;
                 }
-                return aggs.DateHistogram(fieldName, d => d.Field(condition).CalendarInterval(interval).Format("yyyy-MM-dd").Aggregations(aggs => aggs.Terms("group_by_script", t => t.Script(_script).Aggregations(GroupBy(fields)))));
+                if (string.IsNullOrWhiteSpace(fieldname)) continue;
+                _script.Add($"doc['{fieldname}'].value");
             }
+            if (string.IsNullOrWhiteSpace(datefield)) throw new NullReferenceException("未标记时间特性");
+
             return (s) =>
             {
-                s.Size(0).Aggregations(group);
+                s.Size(0).Aggregations(ags => ags.DateHistogram(datefield, d => d.Field(datefield).CalendarInterval(interval).Format("yyyy-MM-dd")
+                         .Aggregations(aggs => aggs.Terms("group_by_script", t => t.Script(string.Join("+'-'+", _script))
+                         .Aggregations(Aggregation(selector))
+                         ))));
                 search.Invoke(s);
                 return s;
             };
         }
+
         /// <summary>
         /// 查询指定字段
         /// </summary>
@@ -1060,6 +1092,10 @@ namespace Simple.Elasticsearch
         /// <returns></returns>
         public static TDocument ToAggregate<TDocument>(this ISearchResponse<TDocument> response) where TDocument : class, IDocument
         {
+            if (!response.IsValid)
+            {
+                throw response.OriginalException;
+            }
             TDocument document = Activator.CreateInstance<TDocument>();
             IEnumerable<PropertyInfo> properties = typeof(TDocument).GetProperties().Where(c => c.HasAttribute<AggregateAttribute>());
             foreach (PropertyInfo property in properties)
@@ -1093,6 +1129,25 @@ namespace Simple.Elasticsearch
             }
             return document;
         }
+
+        public static IEnumerable<TDocument> ToAggregate<TDocument>(this ISearchResponse<TDocument> response, Expression<Func<TDocument, object>> keySelector) where TDocument : class, IDocument
+        {
+            if (!response.IsValid)
+            {
+                throw response.OriginalException;
+            }
+            List<string> _script = new List<string>();
+            Type type = typeof(TDocument);
+            foreach (PropertyInfo property in keySelector.GetPropertys())
+            {
+                PropertyInfo propertyInfo = type.GetProperty(property.Name);
+                if (propertyInfo == null) continue;
+                string? fieldname = propertyInfo.GetFieldName();
+                if (string.IsNullOrWhiteSpace(fieldname)) continue;
+                _script.Add(fieldname);
+            }
+            return response.ToAggregate(string.Join("-", _script));
+        }
         /// <summary>
         /// 转换聚合值
         /// </summary>
@@ -1102,7 +1157,10 @@ namespace Simple.Elasticsearch
         /// <returns></returns>
         public static IEnumerable<TDocument> ToAggregate<TDocument>(this ISearchResponse<TDocument> response, string script) where TDocument : class, IDocument
         {
-            if (response == null) throw new NullReferenceException();
+            if (!response.IsValid)
+            {
+                throw response.OriginalException;
+            }
             IEnumerable<PropertyInfo> properties = typeof(TDocument).GetProperties();
             string[] scripts = script.ToLower().GetArray<string>();
             foreach (var item in response.Aggregations.Terms("group_by_script").Buckets)
@@ -1119,7 +1177,7 @@ namespace Simple.Elasticsearch
                     }
                     else if (scripts.Contains(name))
                     {
-                        int index = System.Array.IndexOf(scripts, name);
+                        int index = Array.IndexOf(scripts, name);
                         if (property.PropertyType.IsEnum)
                         {
                             value = key_value[index].ToEnum(property.PropertyType);
@@ -1161,21 +1219,58 @@ namespace Simple.Elasticsearch
                 yield return document;
             }
         }
+
+        /// <summary>
+        /// 时间聚合转换
+        /// </summary>
+        /// <typeparam name="TDocument"></typeparam>
+        /// <param name="response"></param>
+        /// <param name="keySelector"></param>
+        /// <returns></returns>
+        /// <exception cref="NullReferenceException"></exception>
+        public static IEnumerable<TDocument> ToDateAggregate<TDocument>(this ISearchResponse<TDocument> response, Expression<Func<TDocument, object>> keySelector) where TDocument : class, IDocument
+        {
+            if (!response.IsValid)
+            {
+                throw response.OriginalException;
+            }
+            List<string> _script = new List<string>();
+            Type type = typeof(TDocument);
+            //时间对象字段
+            string? datefield = string.Empty;
+            foreach (PropertyInfo property in keySelector.GetPropertys())
+            {
+                PropertyInfo propertyInfo = type.GetProperty(property.Name);
+                if (propertyInfo == null) continue;
+                string? fieldname = propertyInfo.GetFieldName();
+                if (propertyInfo.HasAttribute<DateAttribute>())
+                {
+                    datefield = fieldname;
+                    continue;
+                }
+                if (string.IsNullOrWhiteSpace(fieldname)) continue;
+                _script.Add(fieldname);
+            }
+            if (string.IsNullOrWhiteSpace(datefield)) throw new NullReferenceException("未标记时间特性");
+            return response.ToDateAggregate(datefield, string.Join("-", _script));
+        }
         /// <summary>
         /// 时间聚合转换
         /// </summary>
         /// <param name="response"></param>
-        /// <param name="field">日期聚合的条件</param>
+        /// <param name="datefield">日期的名称</param>
         /// <param name="script">聚合条件脚本，多字段逗号分隔，注意（顺序跟Group中的script一致）</param>
         /// <returns></returns>
-        public static IEnumerable<TDocument> ToDateAggregate<TDocument>(this ISearchResponse<TDocument> response, Expression<Func<TDocument, DateTime>> field, string script) where TDocument : class, IDocument
+        public static IEnumerable<TDocument> ToDateAggregate<TDocument>(this ISearchResponse<TDocument> response, string datefield, string script) where TDocument : class, IDocument
         {
+            if (!response.IsValid)
+            {
+                throw response.OriginalException;
+            }
             if (response == null) throw new NullReferenceException();
-            string condition = field.GetFieldName();
-            PropertyInfo propertyCondition = field.ToPropertyInfo();
             IEnumerable<PropertyInfo> properties = typeof(TDocument).GetProperties();
             string[] scripts = script.ToLower().GetArray<string>();
-            foreach (DateHistogramBucket bucket in response.Aggregations.DateHistogram(condition).Buckets)
+            foreach (DateHistogramBucket bucket in response.Aggregations.DateHistogram(datefield).Buckets)
             {
                 TDocument document = Activator.CreateInstance<TDocument>();
                 DateTime key_date = Convert.ToDateTime(bucket.KeyAsString);
@@ -1185,7 +1280,7 @@ namespace Simple.Elasticsearch
                     foreach (PropertyInfo property in properties)
                     {
                         object? value = null;
-                        string name = property.GetFieldName().ToLower();
+                        string? name = property.GetFieldName();
                         if (property.HasAttribute<CountAttribute>())
                         {
                             value = item.DocCount;
@@ -1202,15 +1297,15 @@ namespace Simple.Elasticsearch
                                 value = key_value[index];
                             }
                         }
-                        else if (property.Name.ToLower() == propertyCondition.Name.ToLower())
+                        else if (property.Name.ToLower() == datefield.ToLower())
                         {
                             value = key_date;
                         }
                         else
                         {
-                            AggregateAttribute aggregate = property.GetAttribute<AggregateAttribute>();
+                            AggregateAttribute? aggregate = property.GetAttribute<AggregateAttribute>();
                             if (aggregate == null) continue;
-                            string fieldname = aggregate.Name ?? property.GetFieldName();
+                            string? fieldname = aggregate.Name ?? property.GetFieldName();
                             if (aggregate.Type == AggregateType.Sum)
                             {
                                 value = item.Sum(fieldname)?.Value;
@@ -1280,7 +1375,7 @@ namespace Simple.Elasticsearch
         /// <returns></returns>
         private static string GetFieldName<TDocument, TValue>(this Expression<Func<TDocument, TValue>> field) where TDocument : class
         {
-            return field.ToPropertyInfo().GetFieldName();
+            return field.GetPropertyInfo().GetFieldName();
         }
         /// <summary>
         /// 索引不存在时，创建索引
@@ -1363,7 +1458,7 @@ namespace Simple.Elasticsearch
         /// </summary>
         /// <param name="property"></param>
         /// <returns></returns>
-        private static string GetFieldName(this PropertyInfo property)
+        private static string? GetFieldName(this PropertyInfo property)
         {
             NumberAttribute number = property.GetAttribute<NumberAttribute>();
             if (number != null)
@@ -1397,6 +1492,11 @@ namespace Simple.Elasticsearch
                     return text.Name;
                 }
             }
+            if (!string.IsNullOrWhiteSpace(property.Name))
+            {
+                //首字母转小写
+                return property.Name.Substring(0, 1).ToLower() + property.Name.Substring(1);
+            }
             return property.Name;
         }
 
@@ -1423,7 +1523,7 @@ namespace Simple.Elasticsearch
         /// <typeparam name="TKey"></typeparam>
         /// <param name="expression"></param>
         /// <returns></returns>
-        private static PropertyInfo ToPropertyInfo<T, TKey>(this Expression<Func<T, TKey>> expression) where T : class
+        private static PropertyInfo GetPropertyInfo<T, TKey>(this Expression<Func<T, TKey>> expression) where T : class
         {
             PropertyInfo property = null;
             switch (expression.Body.NodeType)
@@ -1437,6 +1537,29 @@ namespace Simple.Elasticsearch
             }
             return property;
         }
+        /// <summary>
+        /// 获取Propertys
+        /// </summary>
+        /// <typeparam name="TSource"></typeparam>
+        /// <typeparam name="Key"></typeparam>
+        /// <param name="exp"></param>
+        /// <returns></returns>
+        public static IEnumerable<PropertyInfo> GetPropertys<TSource, Key>(this Expression<Func<TSource, Key>> expression) where TSource : class
+        {
+            NewExpression? node = expression.Body as NewExpression;
+            if (node != null)
+            {
+                foreach (MemberInfo member in node.Members)
+                {
+                    yield return (PropertyInfo)member;
+                }
+            }
+            else
+            {
+                yield return expression.GetPropertyInfo();
+            }
+        }
+
         /// <summary>
         /// 将给定对象转换为不同类型
         /// </summary>
