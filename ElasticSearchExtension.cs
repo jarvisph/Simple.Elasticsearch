@@ -70,7 +70,7 @@ namespace Simple.Elasticsearch
             IndexResponse response = client.Index(new IndexRequest<TDocument>(document, elasticsearch.IndexName));
             if (!response.IsValid)
             {
-                throw response.OriginalException;
+                throw new Exception(response.DebugInformation);
             }
             return response.IsValid;
         }
@@ -100,7 +100,7 @@ namespace Simple.Elasticsearch
             BulkResponse response = client.IndexMany(documents, elasticsearch.IndexName);
             if (!response.IsValid)
             {
-                throw response.OriginalException;
+                throw new Exception(response.DebugInformation);
             }
             return response.IsValid;
         }
@@ -134,7 +134,7 @@ namespace Simple.Elasticsearch
             DeleteByQueryResponse response = client.DeleteByQuery(action);
             if (!response.IsValid)
             {
-                throw response.OriginalException;
+                throw new Exception(response.DebugInformation);
             }
             return response.IsValid;
         }
@@ -1040,13 +1040,33 @@ namespace Simple.Elasticsearch
                     continue;
                 }
                 if (string.IsNullOrWhiteSpace(fieldname)) continue;
-                _script.Add($"doc['{fieldname}'].value");
+                _script.Add(fieldname);
             }
             if (string.IsNullOrWhiteSpace(datefield)) throw new NullReferenceException("未标记时间特性");
+            return search.GroupByDate(interval, _script.ToArray(), datefield, selector);
 
+
+        }
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <typeparam name="TDocument"></typeparam>
+        /// <param name="search"></param>
+        /// <param name="interval"></param>
+        /// <param name="script"></param>
+        /// <param name="dateKey">时间分组的key</param>
+        /// <param name="selector"></param>
+        /// <returns></returns>
+        public static Func<SearchDescriptor<TDocument>, ISearchRequest> GroupByDate<TDocument>(this Func<SearchDescriptor<TDocument>, ISearchRequest> search, DateInterval interval, string[] script, string dateKey, Expression<Func<TDocument, object>> selector) where TDocument : class, IDocument
+        {
+            List<string> _script = new List<string>();
+            foreach (var fieldname in script)
+            {
+                _script.Add($"doc['{fieldname}'].value");
+            }
             return (s) =>
             {
-                s.Size(0).Aggregations(ags => ags.DateHistogram(datefield, d => d.Field(datefield).CalendarInterval(interval).Format("yyyy-MM-dd")
+                s.Size(0).Aggregations(ags => ags.DateHistogram(dateKey, d => d.Field(dateKey).CalendarInterval(interval).Format("yyyy-MM-dd")
                          .Aggregations(aggs => aggs.Terms("group_by_script", t => t.Script(string.Join("+'-'+", _script))
                          .Aggregations(Aggregation(selector))
                          ))));
@@ -1094,7 +1114,7 @@ namespace Simple.Elasticsearch
         {
             if (!response.IsValid)
             {
-                throw response.OriginalException;
+                throw new Exception(response.DebugInformation);
             }
             TDocument document = Activator.CreateInstance<TDocument>();
             IEnumerable<PropertyInfo> properties = typeof(TDocument).GetProperties().Where(c => c.HasAttribute<AggregateAttribute>());
@@ -1134,7 +1154,7 @@ namespace Simple.Elasticsearch
         {
             if (!response.IsValid)
             {
-                throw response.OriginalException;
+                throw new Exception(response.DebugInformation);
             }
             List<string> _script = new List<string>();
             Type type = typeof(TDocument);
@@ -1159,7 +1179,7 @@ namespace Simple.Elasticsearch
         {
             if (!response.IsValid)
             {
-                throw response.OriginalException;
+                throw new Exception(response.DebugInformation);
             }
             IEnumerable<PropertyInfo> properties = typeof(TDocument).GetProperties();
             string[] scripts = script.ToLower().GetArray<string>();
@@ -1232,7 +1252,7 @@ namespace Simple.Elasticsearch
         {
             if (!response.IsValid)
             {
-                throw response.OriginalException;
+                throw new Exception(response.DebugInformation);
             }
             List<string> _script = new List<string>();
             Type type = typeof(TDocument);
@@ -1252,7 +1272,7 @@ namespace Simple.Elasticsearch
                 _script.Add(fieldname);
             }
             if (string.IsNullOrWhiteSpace(datefield)) throw new NullReferenceException("未标记时间特性");
-            return response.ToDateAggregate(datefield, string.Join("-", _script));
+            return response.ToDateAggregate(datefield, _script.ToArray());
         }
         /// <summary>
         /// 时间聚合转换
@@ -1261,7 +1281,7 @@ namespace Simple.Elasticsearch
         /// <param name="datefield">日期的名称</param>
         /// <param name="script">聚合条件脚本，多字段逗号分隔，注意（顺序跟Group中的script一致）</param>
         /// <returns></returns>
-        public static IEnumerable<TDocument> ToDateAggregate<TDocument>(this ISearchResponse<TDocument> response, string datefield, string script) where TDocument : class, IDocument
+        public static IEnumerable<TDocument> ToDateAggregate<TDocument>(this ISearchResponse<TDocument> response, string datefield, string[] script) where TDocument : class, IDocument
         {
             if (!response.IsValid)
             {
@@ -1269,11 +1289,9 @@ namespace Simple.Elasticsearch
             }
             if (response == null) throw new NullReferenceException();
             IEnumerable<PropertyInfo> properties = typeof(TDocument).GetProperties();
-            string[] scripts = script.ToLower().GetArray<string>();
             foreach (DateHistogramBucket bucket in response.Aggregations.DateHistogram(datefield).Buckets)
             {
                 TDocument document = Activator.CreateInstance<TDocument>();
-                DateTime key_date = Convert.ToDateTime(bucket.KeyAsString);
                 foreach (var item in bucket.Terms("group_by_script").Buckets)
                 {
                     string[] key_value = item.Key.GetArray<string>('-');
@@ -1285,9 +1303,9 @@ namespace Simple.Elasticsearch
                         {
                             value = item.DocCount;
                         }
-                        else if (scripts.Contains(name))
+                        else if (script.Contains(name))
                         {
-                            int index = Array.IndexOf(scripts, name);
+                            int index = Array.IndexOf(script, name);
                             if (property.PropertyType.IsEnum)
                             {
                                 value = key_value[index].ToEnum(property.PropertyType);
@@ -1299,7 +1317,7 @@ namespace Simple.Elasticsearch
                         }
                         else if (property.Name.ToLower() == datefield.ToLower())
                         {
-                            value = key_date;
+                            value = bucket.Date;
                         }
                         else
                         {
@@ -1651,9 +1669,8 @@ namespace Simple.Elasticsearch
         }
         public static object ToEnum(this string value, Type type)
         {
-            MethodInfo mi = typeof(ElasticSearchExtension).GetMethods().FirstOrDefault(t => t.Name == "ToEnum" && t.IsGenericMethod);
-            MethodInfo gmi = mi.MakeGenericMethod(type);
-            return gmi.Invoke(null, new object[] { value });
+            if (string.IsNullOrWhiteSpace(value) || !type.IsEnum) return default;
+            return Enum.IsDefined(type, value) ? Enum.Parse(type, value) : default;
         }
 
         /// <summary>
