@@ -1250,10 +1250,6 @@ namespace Simple.Elasticsearch
         /// <exception cref="NullReferenceException"></exception>
         public static IEnumerable<TDocument> ToDateAggregate<TDocument>(this ISearchResponse<TDocument> response, Expression<Func<TDocument, object>> keySelector) where TDocument : class, IDocument
         {
-            if (!response.IsValid)
-            {
-                throw new Exception(response.DebugInformation);
-            }
             List<string> _script = new List<string>();
             Type type = typeof(TDocument);
             //时间对象字段
@@ -1285,7 +1281,7 @@ namespace Simple.Elasticsearch
         {
             if (!response.IsValid)
             {
-                throw response.OriginalException;
+                throw new Exception(response.DebugInformation);
             }
             if (response == null) throw new NullReferenceException();
             IEnumerable<PropertyInfo> properties = typeof(TDocument).GetProperties();
