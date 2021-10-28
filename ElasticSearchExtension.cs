@@ -1295,6 +1295,7 @@ namespace Simple.Elasticsearch
                     {
                         object? value = null;
                         string? name = property.GetFieldName();
+                        DateAttribute? dateAttribute = property.GetAttribute<DateAttribute>();
                         if (property.HasAttribute<CountAttribute>())
                         {
                             value = item.DocCount;
@@ -1311,9 +1312,12 @@ namespace Simple.Elasticsearch
                                 value = key_value[index];
                             }
                         }
-                        else if (property.Name.ToLower() == datefield.ToLower())
+                        else if (dateAttribute != null)
                         {
-                            value = bucket.Date;
+                            if (dateAttribute.Name == name)
+                            {
+                                value = bucket.Date;
+                            }
                         }
                         else
                         {
@@ -1505,11 +1509,6 @@ namespace Simple.Elasticsearch
                 {
                     return text.Name;
                 }
-            }
-            if (!string.IsNullOrWhiteSpace(property.Name))
-            {
-                //首字母转小写
-                return property.Name.Substring(0, 1).ToLower() + property.Name.Substring(1);
             }
             return property.Name;
         }
