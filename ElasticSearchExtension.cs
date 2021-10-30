@@ -1066,7 +1066,7 @@ namespace Simple.Elasticsearch
             }
             return (s) =>
             {
-                s.Size(0).Aggregations(ags => ags.DateHistogram(dateKey, d => d.Field(dateKey).CalendarInterval(interval).Format("yyyy-MM-dd")
+                s.Size(0).Aggregations(ags => ags.DateHistogram(dateKey, d => d.Field(dateKey).Interval(interval).Format("yyyy-MM-dd")
                          .Aggregations(aggs => aggs.Terms("group_by_script", t => t.Script(string.Join("+'-'+", _script))
                          .Aggregations(Aggregation(selector))
                          ))));
