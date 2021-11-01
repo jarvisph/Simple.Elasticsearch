@@ -931,7 +931,7 @@ namespace Simple.Elasticsearch
                 if (string.IsNullOrWhiteSpace(fieldname)) continue;
                 _script.Add(fieldname);
             }
-            return search.GroupBy(string.Join(",", _script), keySelector);
+            return search.GroupBy(string.Join(",", _script), selector);
         }
 
         /// <summary>
@@ -943,12 +943,12 @@ namespace Simple.Elasticsearch
         /// <param name="script"></param>
         /// <param name="keySelector"></param>
         /// <returns></returns>
-        public static Func<SearchDescriptor<TDocument>, ISearchRequest> GroupBy<TDocument, Key>(this Func<SearchDescriptor<TDocument>, ISearchRequest> search, string script, Expression<Func<TDocument, Key>> keySelector) where TDocument : class, IDocument
+        public static Func<SearchDescriptor<TDocument>, ISearchRequest> GroupBy<TDocument, Key>(this Func<SearchDescriptor<TDocument>, ISearchRequest> search, string script, Expression<Func<TDocument, Key>> selector) where TDocument : class, IDocument
         {
             IAggregationContainer group(AggregationContainerDescriptor<TDocument> aggs)
             {
                 string[] array = script.GetArray<string>().Select(c => $"doc['{c}'].value").ToArray();
-                return aggs.Terms("group_by_script", t => t.Script(string.Join("+'-'+", array)).Aggregations(Aggregation(keySelector)));
+                return aggs.Terms("group_by_script", t => t.Script(string.Join("+'-'+", array)).Aggregations(Aggregation(selector)));
             };
             return (s) =>
             {
@@ -963,14 +963,14 @@ namespace Simple.Elasticsearch
         /// </summary>
         /// <typeparam name="TDocument"></typeparam>
         /// <typeparam name="Key"></typeparam>
-        /// <param name="keySelector"></param>
+        /// <param name="selector"></param>
         /// <returns></returns>
-        private static Func<AggregationContainerDescriptor<TDocument>, IAggregationContainer> Aggregation<TDocument, Key>(Expression<Func<TDocument, Key>> keySelector) where TDocument : class, IDocument
+        private static Func<AggregationContainerDescriptor<TDocument>, IAggregationContainer> Aggregation<TDocument, Key>(Expression<Func<TDocument, Key>> selector) where TDocument : class, IDocument
         {
             return (s) =>
             {
                 Type type = typeof(TDocument);
-                foreach (var property in keySelector.GetPropertys())
+                foreach (var property in selector.GetPropertys())
                 {
                     if (property == null) continue;
                     var propertyinfo = type.GetProperty(property.Name);
