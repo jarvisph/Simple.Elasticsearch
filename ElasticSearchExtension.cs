@@ -835,7 +835,19 @@ namespace Simple.Elasticsearch
             if (query == null) throw new NullReferenceException();
             return query.Sort(c => c.Ascending(field));
         }
+        public static SearchDescriptor<TDocument> OrderBy<TDocument>(this SearchDescriptor<TDocument> query, string field) where TDocument : class, IDocument
+        {
+            if (query == null) throw new NullReferenceException();
+            return query.Sort(c => c.Ascending(field));
+        }
         public static Func<SearchDescriptor<TDocument>, ISearchRequest> OrderBy<TDocument, TValue>(this Func<SearchDescriptor<TDocument>, ISearchRequest> search, Expression<Func<TDocument, TValue>> field) where TDocument : class, IDocument
+        {
+            return (s) =>
+            {
+                return search.Invoke(s.OrderBy(field));
+            };
+        }
+        public static Func<SearchDescriptor<TDocument>, ISearchRequest> OrderBy<TDocument>(this Func<SearchDescriptor<TDocument>, ISearchRequest> search, string field) where TDocument : class, IDocument
         {
             return (s) =>
             {
