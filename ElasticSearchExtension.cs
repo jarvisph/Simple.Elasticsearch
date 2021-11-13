@@ -569,6 +569,10 @@ namespace Simple.Elasticsearch
                     {
                         query.Range(r => r.GreaterThan(Convert.ToDouble(v)).Field(field));
                     }
+                    else if (value.Value is int)
+                    {
+                        query.Range(r => r.GreaterThan((int)v).Field(field));
+                    }
                     else
                     {
                         query.Range(r => r.GreaterThan((double)v).Field(field));
@@ -586,6 +590,10 @@ namespace Simple.Elasticsearch
                     else if (value.Value is Decimal)
                     {
                         query.Range(r => r.GreaterThanOrEquals(Convert.ToDouble(v)).Field(field));
+                    }
+                    else if (value.Value is int)
+                    {
+                        query.Range(r => r.GreaterThanOrEquals((int)v).Field(field));
                     }
                     else
                     {
@@ -605,6 +613,10 @@ namespace Simple.Elasticsearch
                     {
                         query.Range(r => r.LessThan(Convert.ToDouble(v)).Field(field));
                     }
+                    else if (value.Value is int)
+                    {
+                        query.Range(r => r.LessThan((int)v).Field(field));
+                    }
                     else
                     {
                         query.Range(r => r.LessThan((double)v).Field(field));
@@ -622,6 +634,10 @@ namespace Simple.Elasticsearch
                     else if (value.Value is Decimal)
                     {
                         query.Range(r => r.LessThanOrEquals(Convert.ToDouble(v)).Field(field));
+                    }
+                    else if (value.Value is int)
+                    {
+                        query.Range(r => r.LessThanOrEquals((int)v).Field(field));
                     }
                     else
                     {
@@ -653,6 +669,10 @@ namespace Simple.Elasticsearch
                     {
                         query.Range(r => r.GreaterThan(Convert.ToDouble(v)).Field(script));
                     }
+                    else if (value.Value is int)
+                    {
+                        query.Range(r => r.GreaterThan((int)v).Field(script));
+                    }
                     else
                     {
                         query.Range(r => r.GreaterThan((double)v).Field(script));
@@ -670,6 +690,10 @@ namespace Simple.Elasticsearch
                     else if (value.Value is Decimal)
                     {
                         query.Range(r => r.GreaterThanOrEquals(Convert.ToDouble(v)).Field(script));
+                    }
+                    else if (value.Value is int)
+                    {
+                        query.Range(r => r.GreaterThanOrEquals((int)v).Field(script));
                     }
                     else
                     {
@@ -689,6 +713,10 @@ namespace Simple.Elasticsearch
                     {
                         query.Range(r => r.LessThan(Convert.ToDouble(v)).Field(script));
                     }
+                    else if (value.Value is int)
+                    {
+                        query.Range(r => r.LessThan((int)v).Field(script));
+                    }
                     else
                     {
                         query.Range(r => r.LessThan((double)v).Field(script));
@@ -706,6 +734,10 @@ namespace Simple.Elasticsearch
                     else if (value.Value is Decimal)
                     {
                         query.Range(r => r.LessThanOrEquals(Convert.ToDouble(v)).Field(script));
+                    }
+                    else if (value.Value is int)
+                    {
+                        query.Range(r => r.LessThanOrEquals((int)v).Field(script));
                     }
                     else
                     {
@@ -941,14 +973,13 @@ namespace Simple.Elasticsearch
         /// <typeparam name="Key"></typeparam>
         /// <param name="search"></param>
         /// <param name="script"></param>
-        /// <param name="keySelector"></param>
         /// <returns></returns>
         public static Func<SearchDescriptor<TDocument>, ISearchRequest> GroupBy<TDocument, Key>(this Func<SearchDescriptor<TDocument>, ISearchRequest> search, string script, Expression<Func<TDocument, Key>> selector) where TDocument : class, IDocument
         {
             IAggregationContainer group(AggregationContainerDescriptor<TDocument> aggs)
             {
                 string[] array = script.GetArray<string>().Select(c => $"doc['{c}'].value").ToArray();
-                return aggs.Terms("group_by_script", t => t.Script(string.Join("+'-'+", array)).Aggregations(Aggregation(selector)));
+                return aggs.Terms("group_by_script", t => t.Script(string.Join("+'-'+", array)).Size(1_000_000).Aggregations(Aggregation(selector)));
             };
             return (s) =>
             {
@@ -1067,7 +1098,7 @@ namespace Simple.Elasticsearch
             return (s) =>
             {
                 s.Size(0).Aggregations(ags => ags.DateHistogram(dateKey, d => d.Field(dateKey).Interval(interval).Format("yyyy-MM-dd")
-                         .Aggregations(aggs => aggs.Terms("group_by_script", t => t.Script(string.Join("+'-'+", _script))
+                         .Aggregations(aggs => aggs.Terms("group_by_script", t => t.Script(string.Join("+'-'+", _script)).Size(1_000_000)
                          .Aggregations(Aggregation(selector))
                          ))));
                 search.Invoke(s);
@@ -1166,7 +1197,7 @@ namespace Simple.Elasticsearch
                 if (string.IsNullOrWhiteSpace(fieldname)) continue;
                 _script.Add(fieldname);
             }
-            return response.ToAggregate(string.Join("-", _script));
+            return response.ToAggregate(_script.ToArray());
         }
         /// <summary>
         /// 转换聚合值
@@ -1175,22 +1206,22 @@ namespace Simple.Elasticsearch
         /// <param name="response"></param>
         /// <param name="script"></param>
         /// <returns></returns>
-        public static IEnumerable<TDocument> ToAggregate<TDocument>(this ISearchResponse<TDocument> response, string script) where TDocument : class, IDocument
+        public static IEnumerable<TDocument> ToAggregate<TDocument>(this ISearchResponse<TDocument> response, string[] scripts) where TDocument : class, IDocument
         {
             if (!response.IsValid)
             {
                 throw new Exception(response.DebugInformation);
             }
             IEnumerable<PropertyInfo> properties = typeof(TDocument).GetProperties();
-            string[] scripts = script.ToLower().GetArray<string>();
             foreach (var item in response.Aggregations.Terms("group_by_script").Buckets)
             {
                 TDocument document = Activator.CreateInstance<TDocument>();
                 string[] key_value = item.Key.GetArray<string>('-');
                 foreach (PropertyInfo property in properties)
                 {
+                    if (!property.CanWrite) continue;
                     object? value = null;
-                    string name = property.GetFieldName().ToLower();
+                    string? name = property.GetFieldName();
                     if (property.HasAttribute<CountAttribute>())
                     {
                         value = item.DocCount;
@@ -1209,9 +1240,9 @@ namespace Simple.Elasticsearch
                     }
                     else
                     {
-                        AggregateAttribute aggregate = property.GetAttribute<AggregateAttribute>();
+                        AggregateAttribute? aggregate = property.GetAttribute<AggregateAttribute>();
                         if (aggregate == null) continue;
-                        string fieldname = aggregate.Name ?? property.GetFieldName();
+                        string? fieldname = aggregate.Name ?? property.GetFieldName();
                         if (aggregate.Type == AggregateType.Sum)
                         {
                             value = item.Sum(fieldname)?.Value;
@@ -1293,6 +1324,7 @@ namespace Simple.Elasticsearch
                     string[] key_value = item.Key.GetArray<string>('-');
                     foreach (PropertyInfo property in properties)
                     {
+                        if (!property.CanWrite) continue;
                         object? value = null;
                         string? name = property.GetFieldName();
                         DateAttribute? dateAttribute = property.GetAttribute<DateAttribute>();
@@ -1665,6 +1697,14 @@ namespace Simple.Elasticsearch
         public static object ToEnum(this string value, Type type)
         {
             if (string.IsNullOrWhiteSpace(value) || !type.IsEnum) return default;
+            if (int.TryParse(value, out int int_value))
+            {
+                return Enum.ToObject(type, int_value);
+            }
+            else if (byte.TryParse(value, out byte byte_value))
+            {
+                return Enum.ToObject(type, byte_value);
+            }
             return Enum.IsDefined(type, value) ? Enum.Parse(type, value) : default;
         }
 
