@@ -1130,6 +1130,11 @@ namespace Simple.Elasticsearch
             if (query == null) throw new NullReferenceException();
             return query.Source(sc => sc.Includes(ic => ic.Fields(fields)));
         }
+        public static SearchDescriptor<TDocument> Select<TDocument>(this SearchDescriptor<TDocument> query, string[] fields) where TDocument : class, IDocument
+        {
+            if (query == null) throw new NullReferenceException();
+            return query.Source(sc => sc.Includes(ic => ic.Fields(fields)));
+        }
         /// <summary>
         /// 查询指定字段
         /// </summary>
@@ -1142,6 +1147,18 @@ namespace Simple.Elasticsearch
             if (search == null) throw new NullReferenceException();
             return (s) =>
             {
+                s.Select(fields);
+                search.Invoke(s);
+                return s;
+            };
+        }
+        public static Func<SearchDescriptor<TDocument>, ISearchRequest> Select<TDocument>(this Func<SearchDescriptor<TDocument>, ISearchRequest> search, Expression<Func<TDocument, object>> field) where TDocument : class, IDocument
+        {
+            if (search == null) throw new NullReferenceException();
+            return (s) =>
+            {
+
+                string[] fields = field.GetPropertys().Select(c => c.Name).ToArray();
                 s.Select(fields);
                 search.Invoke(s);
                 return s;
