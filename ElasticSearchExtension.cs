@@ -826,6 +826,21 @@ namespace Simple.Elasticsearch
             if (query == null) throw new NullReferenceException();
             return query.Sort(c => c.Descending(field));
         }
+        public static SearchDescriptor<TDocument> OrderByDescending<TDocument, TValue>(this SearchDescriptor<TDocument> query, Expression<Func<TDocument, TValue>> field, string fieldname, string order) where TDocument : class, IDocument
+        {
+            if (query == null) throw new NullReferenceException();
+            if (!string.IsNullOrWhiteSpace(fieldname) && !string.IsNullOrWhiteSpace(order))
+            {
+                switch (order.ToLower())
+                {
+                    case "descending":
+                        return query.Sort(c => c.Descending(fieldname));
+                    case "ascending":
+                        return query.Sort(c => c.Ascending(fieldname));
+                }
+            }
+            return query.Sort(c => c.Descending(field));
+        }
         /// <summary>
         /// 降序，根据字段排序
         /// </summary>
@@ -844,6 +859,23 @@ namespace Simple.Elasticsearch
             return (s) =>
             {
                 return search.Invoke(s.OrderByDescending(field));
+            };
+        }
+        /// <summary>
+        /// 指定字段排序
+        /// </summary>
+        /// <typeparam name="TDocument"></typeparam>
+        /// <typeparam name="TValue"></typeparam>
+        /// <param name="search"></param>
+        /// <param name="field"></param>
+        /// <param name="fieldname"></param>
+        /// <param name="order"></param>
+        /// <returns></returns>
+        public static Func<SearchDescriptor<TDocument>, ISearchRequest> OrderByDescending<TDocument, TValue>(this Func<SearchDescriptor<TDocument>, ISearchRequest> search, Expression<Func<TDocument, TValue>> field, string fieldname, string order) where TDocument : class, IDocument
+        {
+            return (s) =>
+            {
+                return search.Invoke(s.OrderByDescending(field, fieldname, order));
             };
         }
 
