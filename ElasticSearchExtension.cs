@@ -16,35 +16,62 @@ namespace Simple.Elasticsearch
         /// 索引缓存
         /// </summary>
         private static readonly Dictionary<string, bool> IndexCache = new Dictionary<string, bool>();
+
         /// <summary>
-        /// 生成更新脚本
+        /// 修改一个字段
         /// </summary>
-        /// <param name="desc">ES对象</param>
-        /// <param name="entity">要更新的对象</param>
-        /// <param name="firstCharToLower">是否首字母小写（默认小写）</param>
-        public static UpdateByQueryDescriptor<TEntity> Script<TEntity>(this UpdateByQueryDescriptor<TEntity> desc, object entity, bool firstCharToLower = true) where TEntity : class
+        /// <typeparam name="TDocument"></typeparam>
+        /// <typeparam name="TValue"></typeparam>
+        /// <param name="client"></param>
+        /// <param name="value"></param>
+        /// <param name="field"></param>
+        /// <returns></returns>
+        public static bool Update<TDocument, TValue>(this IElasticClient client, Expression<Func<TDocument, TValue>> field, TValue value, params Func<QueryContainerDescriptor<TDocument>, QueryContainer>[] queries) where TDocument : class, IDocument
         {
-            var lstScript = new List<string>();
-            var dicValue = new Dictionary<string, object>();
-
-            foreach (PropertyInfo property in entity.GetType().GetProperties())
-            {
-                string field = property.GetFieldName();
-                // 首字母小写
-                if (firstCharToLower)
-                {
-                    var firstChar = field.Substring(0, 1).ToLower();
-                    if (field.Length > 1) field = firstChar + field.Substring(1);
-                    else field = firstChar;
-                }
-
-                lstScript.Add($"ctx._source.{field}=params.{field}");
-                dicValue.Add(field, property.GetValue(entity));
-            }
-
-            return desc.Script(s => s.Source(string.Join(';', lstScript)).Params(dicValue));
+            if (value == null) return false;
+            if (field == null) return false;
+            string indexname = typeof(TDocument).GetIndexName();
+            string fieldname = field.GetFieldName();
+            UpdateByQueryResponse response = client.UpdateByQuery<TDocument>(c => c.Index(indexname).Query(q => q.Bool(b => b.Must(queries)))
+                                                                                   .Script(s => s.Source($"ctx._source.{fieldname}=params.{fieldname}")
+                                                                                   .Params(new Dictionary<string, object> { { fieldname, value } })));
+            if (!response.IsValid) throw response.OriginalException;
+            return response.IsValid;
         }
-
+        /// <summary>
+        /// 修改指定的字段
+        /// </summary>
+        /// <typeparam name="TDocument"></typeparam>
+        /// <param name="client"></param>
+        /// <param name="document"></param>
+        /// <param name="field"></param>
+        /// <param name="queries"></param>
+        /// <returns></returns>
+        public static bool Update<TDocument>(this IElasticClient client, TDocument document, Expression<Func<TDocument, object>> field, params Func<QueryContainerDescriptor<TDocument>, QueryContainer>[] queries) where TDocument : class, IDocument
+        {
+            if (document == null) return false;
+            if (field == null) return false;
+            string indexname = typeof(TDocument).GetIndexName();
+            IEnumerable<PropertyInfo> properties = field.GetPropertys();
+            List<string> fields = new List<string>();
+            Dictionary<string, object> param = new Dictionary<string, object>();
+            foreach (PropertyInfo property in properties)
+            {
+                fields.Add(property.Name);
+            }
+            foreach (PropertyInfo property in document.GetType().GetProperties())
+            {
+                if (fields.Any(t => t == property.Name))
+                {
+                    param.Add(property.Name, property.GetValue(document));
+                }
+            }
+            UpdateByQueryResponse response = client.UpdateByQuery<TDocument>(c => c.Index(indexname).Query(q => q.Bool(b => b.Must(queries)))
+                                                                                 .Script(s => s.Source(string.Join(";", fields.Select(c => $"ctx._source.{c}=params.{c}")))
+                                                                                 .Params(param)));
+            if (!response.IsValid) throw response.OriginalException;
+            return response.IsValid;
+        }
         /// <summary>
         /// 新增
         /// </summary>
@@ -55,6 +82,7 @@ namespace Simple.Elasticsearch
         /// <exception cref="ArgumentNullException"></exception>
         public static bool Insert<TDocument>(this IElasticClient client, TDocument document, DateTime? indexDateTime = null) where TDocument : class, IDocument
         {
+            if (document == null) return false;
             ElasticSearchIndexAttribute elasticsearch = typeof(TDocument).GetAttribute<ElasticSearchIndexAttribute>();
             if (elasticsearch == null) throw new ArgumentNullException("缺失ElasticSearchIndex特性");
             //检查是否已经创建索引
@@ -244,31 +272,12 @@ namespace Simple.Elasticsearch
         {
             return client.Count(value, field) > 0;
         }
+    
         /// <summary>
         /// 获取第一条数据
         /// </summary>
         /// <typeparam name="TDocument"></typeparam>
-        /// <typeparam name="TValue"></typeparam>
         /// <param name="client"></param>
-        /// <param name="value"></param>
-        /// <param name="field"></param>
-        /// <returns>没有则为null</returns>
-        public static TDocument? FirstOrDefault<TDocument, TValue>(this IElasticClient client, TValue value, Expression<Func<TDocument, TValue>> field) where TDocument : class, IDocument
-        {
-            if (client == null) throw new NullReferenceException();
-            if (value == null) throw new NullReferenceException();
-            if (field == null) throw new NullReferenceException();
-            string indexname = typeof(TDocument).GetIndexName();
-            return client.Search<TDocument>(c => c.Index(indexname).Query(q => q.Term(field, value)).Size(1)).Documents?.FirstOrDefault();
-        }
-        /// <summary>
-        /// 获取第一条数据
-        /// </summary>
-        /// <typeparam name="TDocument"></typeparam>
-        /// <typeparam name="TValue"></typeparam>
-        /// <param name="client"></param>
-        /// <param name="value"></param>
-        /// <param name="field"></param>
         /// <returns>没有则为null</returns>
         public static TDocument? FirstOrDefault<TDocument>(this IElasticClient client, params Func<QueryContainerDescriptor<TDocument>, QueryContainer>[] queries) where TDocument : class, IDocument
         {
@@ -307,6 +316,32 @@ namespace Simple.Elasticsearch
             var searchResponse = client.Search<TDocument>(s => s.Index(indexname).Size(size).Scroll(scrollTime).Query(q => q.Bool(b => b.Must(queries))));
             return client.Scroll(searchResponse, size, scrollTime);
         }
+        [Obsolete("未实现禁止调用")]
+        public static IEnumerable<TValue> GroupBy<TDocument, TValue>(this IElasticClient client, Expression<Func<TDocument, TValue>> field, params Func<QueryContainerDescriptor<TDocument>, QueryContainer>[] queries) where TDocument : class where TValue : struct
+        {
+            string indexname = typeof(TDocument).GetIndexName();
+            int size = 1000;
+            int page = 0;
+            while (true)
+            {
+                string filedname = field.GetFieldName();
+                var searchResponse = client.Search<TDocument>(s => s.Index(indexname).Size(0).Query(q => q.Bool(b => b.Must(queries)))
+                                           .Aggregations(aggs => aggs.Terms("group_by_script", t => t.Field(field).Order(c => c.Ascending(filedname)).ShowTermDocCountError(true).Size(size).Include(page, size))));
+                if (!searchResponse.IsValid)
+                {
+                    if (searchResponse.ServerError.Error.Type == "index_not_found_exception") yield break;
+                    throw searchResponse.OriginalException;
+                }
+                var buckets = searchResponse.Aggregations.Terms("group_by_script").Buckets;
+                foreach (var item in buckets)
+                {
+                    yield return item.Key.ToValue<TValue>();
+                }
+                if (buckets.Count < size) break;
+                page++;
+            }
+        }
+
         /// <summary>
         /// 查询条件（仅拼接查询条件，非真实查询）
         /// </summary>
@@ -329,7 +364,6 @@ namespace Simple.Elasticsearch
         /// <typeparam name="TDocument"></typeparam>
         /// <param name="client"></param>
         /// <param name="musts">查询条件</param>
-        /// <param name="must_nots">过滤条件</param>
         /// <returns></returns>
         public static Func<SearchDescriptor<TDocument>, ISearchRequest> Query<TDocument>(this IElasticClient client, IEnumerable<Func<QueryContainerDescriptor<TDocument>, QueryContainer>> musts, IEnumerable<Func<QueryContainerDescriptor<TDocument>, QueryContainer>> mustnots) where TDocument : class, IDocument
         {
@@ -981,12 +1015,11 @@ namespace Simple.Elasticsearch
         {
             return (s) =>
             {
-                s.Size(0).Aggregations(aggs => aggs.Terms("group_by_script", t => t.Field(field)));
+                s.Size(0).Aggregations(aggs => aggs.Terms("group_by_script", t => t.Field(field).Size(1_000_00)));
                 search.Invoke(s);
                 return s;
             };
         }
-
         /// <summary>
         /// 分组
         /// </summary>
@@ -1171,7 +1204,7 @@ namespace Simple.Elasticsearch
         /// 查询指定字段
         /// </summary>
         /// <typeparam name="TDocument"></typeparam>
-        /// <param name="query"></param>
+        /// <param name="search"></param>
         /// <param name="fields"></param>
         /// <returns></returns>
         public static Func<SearchDescriptor<TDocument>, ISearchRequest> Select<TDocument>(this Func<SearchDescriptor<TDocument>, ISearchRequest> search, params Expression<Func<TDocument, object>>[] fields) where TDocument : class, IDocument
@@ -1528,7 +1561,7 @@ namespace Simple.Elasticsearch
 
 
         /// <summary>
-        /// Scroll
+        /// Scroll 文档对象
         /// </summary>
         /// <typeparam name="TDocument"></typeparam>
         /// <param name="client"></param>

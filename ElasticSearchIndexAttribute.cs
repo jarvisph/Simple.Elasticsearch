@@ -25,7 +25,7 @@ namespace Simple.Elasticsearch
         /// </summary>
         public int ShardsCount { get; set; }
         /// <summary>
-        /// 格式
+        /// 格式(空或null 索引不转换格式索引)
         /// </summary>
         public string Format { get; set; }
 
@@ -59,7 +59,10 @@ namespace Simple.Elasticsearch
         /// <param name="datetime"></param>
         public void SetIndexTime(DateTime datetime)
         {
-            this.IndexName = $"{this.IndexName}_{datetime.ToString(this.Format)}";
+            if (!string.IsNullOrWhiteSpace(this.Format))
+            {
+                this.IndexName = $"{this.IndexName}_{datetime.ToString(this.Format)}";
+            }
         }
     }
 }
