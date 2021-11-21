@@ -59,10 +59,7 @@ namespace Simple.Elasticsearch
         /// <param name="datetime"></param>
         public void SetIndexTime(DateTime datetime)
         {
-            if (!string.IsNullOrWhiteSpace(this.Format))
-            {
-                this.IndexName = $"{this.IndexName}_{datetime.ToString(this.Format)}";
-            }
+            this.IndexName = $"{this.IndexName}_{datetime.ToString(this.Format)}";
         }
     }
 }
