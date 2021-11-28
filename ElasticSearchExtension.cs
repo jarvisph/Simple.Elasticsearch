@@ -1,4 +1,5 @@
 ﻿using Nest;
+using Simple.Elasticsearch.Linq;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -272,7 +273,7 @@ namespace Simple.Elasticsearch
         {
             return client.Count(value, field) > 0;
         }
-    
+
         /// <summary>
         /// 获取第一条数据
         /// </summary>
@@ -316,29 +317,31 @@ namespace Simple.Elasticsearch
             var searchResponse = client.Search<TDocument>(s => s.Index(indexname).Size(size).Scroll(scrollTime).Query(q => q.Bool(b => b.Must(queries))));
             return client.Scroll(searchResponse, size, scrollTime);
         }
-        [Obsolete("未实现禁止调用")]
+        /// <summary>
+        /// 聚合
+        /// </summary>
+        /// <typeparam name="TDocument"></typeparam>
+        /// <typeparam name="TValue"></typeparam>
+        /// <param name="client"></param>
+        /// <param name="field"></param>
+        /// <param name="queries"></param>
+        /// <returns></returns>
         public static IEnumerable<TValue> GroupBy<TDocument, TValue>(this IElasticClient client, Expression<Func<TDocument, TValue>> field, params Func<QueryContainerDescriptor<TDocument>, QueryContainer>[] queries) where TDocument : class where TValue : struct
         {
             string indexname = typeof(TDocument).GetIndexName();
-            int size = 1000;
-            int page = 0;
-            while (true)
+            int size = 2147483647;//size设置支持最大数量： 2147483647
+
+            string filedname = field.GetFieldName();
+            var response = client.Search<TDocument>(s => s.Index(indexname).Size(0).Query(q => q.Bool(b => b.Must(queries)))
+                                       .Aggregations(aggs => aggs.Terms("group_by_script", t => t.Field(field).Order(c => c.Ascending(filedname)).ShowTermDocCountError(true).Size(size))));
+            if (!response.IsValid)
             {
-                string filedname = field.GetFieldName();
-                var searchResponse = client.Search<TDocument>(s => s.Index(indexname).Size(0).Query(q => q.Bool(b => b.Must(queries)))
-                                           .Aggregations(aggs => aggs.Terms("group_by_script", t => t.Field(field).Order(c => c.Ascending(filedname)).ShowTermDocCountError(true).Size(size).Include(page, size))));
-                if (!searchResponse.IsValid)
-                {
-                    if (searchResponse.ServerError.Error.Type == "index_not_found_exception") yield break;
-                    throw searchResponse.OriginalException;
-                }
-                var buckets = searchResponse.Aggregations.Terms("group_by_script").Buckets;
-                foreach (var item in buckets)
-                {
-                    yield return item.Key.ToValue<TValue>();
-                }
-                if (buckets.Count < size) break;
-                page++;
+                throw response.OriginalException;
+            }
+            var buckets = response.Aggregations.Terms("group_by_script").Buckets;
+            foreach (var item in buckets)
+            {
+                yield return item.Key.ToValue<TValue>();
             }
         }
 
@@ -408,6 +411,16 @@ namespace Simple.Elasticsearch
             return query;
         }
 
+        /// <summary>
+        /// 创建一个空的Queryable
+        /// </summary>
+        /// <typeparam name="TDocument"></typeparam>
+        /// <param name="client"></param>
+        /// <returns></returns>
+        public static IQueryable<TDocument> Query<TDocument>(this IElasticClient client) where TDocument : class, IDocument
+        {
+            return new ElasticSearchQueryable<TDocument>(new ElasticSearchQueryProvider(client));
+        }
         /// <summary>
         /// 查询（真实查询）
         /// </summary>
@@ -1534,13 +1547,34 @@ namespace Simple.Elasticsearch
                 }
             }
         }
-
+        /// <summary>
+        /// 手动创建索引
+        /// </summary>
+        /// <typeparam name="TDocument"></typeparam>
+        /// <param name="client"></param>
+        /// <param name="indexDateTime"></param>
+        /// <exception cref="ArgumentNullException"></exception>
+        public static void CreateIndex<TDocument>(this IElasticClient client, DateTime? indexDateTime) where TDocument : class
+        {
+            ElasticSearchIndexAttribute elasticsearch = typeof(TDocument).GetAttribute<ElasticSearchIndexAttribute>();
+            if (elasticsearch == null) throw new ArgumentNullException("缺失ElasticSearchIndex特性");
+            if (indexDateTime.HasValue)
+            {
+                elasticsearch.SetIndexTime(indexDateTime.Value);
+            }
+            else
+            {
+                elasticsearch.SetIndexTime(DateTime.Now);
+            }
+            //检查是否已经创建索引
+            client.WhenNotExistsAddIndex<TDocument>(elasticsearch);
+        }
         /// <summary>
         /// 创建索引
         /// </summary>
         private static bool CreateIndex<TDocument>(this IElasticClient client, ElasticSearchIndexAttribute elasticsearch) where TDocument : class
         {
-            var rsp = client.Indices.Create(elasticsearch.IndexName, c => c
+            var response = client.Indices.Create(elasticsearch.IndexName, c => c
                 .Map<TDocument>(m => m.AutoMap())
                 .Aliases(des =>
                 {
@@ -1556,7 +1590,11 @@ namespace Simple.Elasticsearch
                     .RefreshInterval(new Time(TimeSpan.FromSeconds(1)))
                     )
             );
-            return rsp.IsValid;
+            if (!response.IsValid)
+            {
+                throw new Exception(response.DebugInformation);
+            }
+            return response.IsValid;
         }
 
 
@@ -1739,7 +1777,7 @@ namespace Simple.Elasticsearch
         /// <typeparam name="T"></typeparam>
         /// <param name="value"></param>
         /// <returns></returns>
-        private static T ToEnum<T>(this string value) where T : IComparable, IFormattable, IConvertible
+        public static T ToEnum<T>(this string value) where T : IComparable, IFormattable, IConvertible
         {
             if (string.IsNullOrWhiteSpace(value) || !typeof(T).IsEnum) return default;
 
