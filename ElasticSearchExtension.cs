@@ -1,5 +1,4 @@
 ﻿using Nest;
-using Simple.Elasticsearch.Linq;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -411,16 +410,16 @@ namespace Simple.Elasticsearch
             return query;
         }
 
-        /// <summary>
-        /// 创建一个空的Queryable
-        /// </summary>
-        /// <typeparam name="TDocument"></typeparam>
-        /// <param name="client"></param>
-        /// <returns></returns>
-        public static IQueryable<TDocument> Query<TDocument>(this IElasticClient client) where TDocument : class, IDocument
-        {
-            return new ElasticSearchQueryable<TDocument>(new ElasticSearchQueryProvider(client));
-        }
+        ///// <summary>
+        ///// 创建一个空的Queryable
+        ///// </summary>
+        ///// <typeparam name="TDocument"></typeparam>
+        ///// <param name="client"></param>
+        ///// <returns></returns>
+        //public static IQueryable<TDocument> Query<TDocument>(this IElasticClient client) where TDocument : class, IDocument
+        //{
+        //    return new ElasticSearchQueryable<TDocument>(new ElasticSearchQueryProvider(client));
+        //}
         /// <summary>
         /// 查询（真实查询）
         /// </summary>
