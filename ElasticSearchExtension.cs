@@ -10,7 +10,7 @@ using System.Text.RegularExpressions;
 
 namespace Simple.Elasticsearch
 {
-    public static class ElasticSearchExtension
+    public static partial class ElasticSearchExtension
     {
         /// <summary>
         /// 索引缓存
@@ -38,6 +38,7 @@ namespace Simple.Elasticsearch
             if (!response.IsValid) throw response.OriginalException;
             return response.IsValid;
         }
+        
         /// <summary>
         /// 修改指定的字段
         /// </summary>
@@ -72,6 +73,7 @@ namespace Simple.Elasticsearch
             if (!response.IsValid) throw response.OriginalException;
             return response.IsValid;
         }
+       
         /// <summary>
         /// 新增
         /// </summary>
@@ -83,7 +85,7 @@ namespace Simple.Elasticsearch
         public static bool Insert<TDocument>(this IElasticClient client, TDocument document, DateTime? indexDateTime = null) where TDocument : class, IDocument
         {
             if (document == null) return false;
-            ElasticSearchIndexAttribute elasticsearch = typeof(TDocument).GetAttribute<ElasticSearchIndexAttribute>();
+            ElasticSearchIndexAttribute? elasticsearch = typeof(TDocument).GetAttribute<ElasticSearchIndexAttribute>();
             if (elasticsearch == null) throw new ArgumentNullException("缺失ElasticSearchIndex特性");
             //检查是否已经创建索引
             if (indexDateTime.HasValue)
@@ -113,7 +115,7 @@ namespace Simple.Elasticsearch
         /// <exception cref="ArgumentNullException"></exception>
         public static bool Insert<TDocument>(this IElasticClient client, IEnumerable<TDocument> documents, DateTime? indexDateTime = null) where TDocument : class, IDocument
         {
-            ElasticSearchIndexAttribute elasticsearch = typeof(TDocument).GetAttribute<ElasticSearchIndexAttribute>();
+            ElasticSearchIndexAttribute? elasticsearch = typeof(TDocument).GetAttribute<ElasticSearchIndexAttribute>();
             if (elasticsearch == null) throw new ArgumentNullException("缺失ElasticSearchIndex特性");
             if (indexDateTime.HasValue)
             {
@@ -673,11 +675,11 @@ namespace Simple.Elasticsearch
                     {
                         query.DateRange(dr => dr.LessThanOrEquals((DateTime)v).Field(field));
                     }
-                    else if (value.Value is Int64)
+                    else if (value.Value is long)
                     {
                         query.LongRange(r => r.LessThanOrEquals((long)v).Field(field));
                     }
-                    else if (value.Value is Decimal)
+                    else if (value.Value is decimal)
                     {
                         query.Range(r => r.LessThanOrEquals(Convert.ToDouble(v)).Field(field));
                     }
