@@ -38,7 +38,7 @@ namespace Simple.Elasticsearch
             if (!response.IsValid) throw response.OriginalException;
             return response.IsValid;
         }
-        
+
         /// <summary>
         /// 修改指定的字段
         /// </summary>
@@ -73,7 +73,7 @@ namespace Simple.Elasticsearch
             if (!response.IsValid) throw response.OriginalException;
             return response.IsValid;
         }
-       
+
         /// <summary>
         /// 新增
         /// </summary>
@@ -100,6 +100,7 @@ namespace Simple.Elasticsearch
             IndexResponse response = client.Index(new IndexRequest<TDocument>(document, elasticsearch.IndexName));
             if (!response.IsValid)
             {
+                Console.WriteLine(response.DebugInformation);
                 throw new Exception(response.DebugInformation);
             }
             return response.IsValid;
@@ -130,6 +131,7 @@ namespace Simple.Elasticsearch
             BulkResponse response = client.IndexMany(documents, elasticsearch.IndexName);
             if (!response.IsValid)
             {
+                Console.WriteLine(response.DebugInformation);
                 throw new Exception(response.DebugInformation);
             }
             return response.IsValid;
@@ -164,6 +166,7 @@ namespace Simple.Elasticsearch
             DeleteByQueryResponse response = client.DeleteByQuery(action);
             if (!response.IsValid)
             {
+                Console.WriteLine(response.DebugInformation);
                 throw new Exception(response.DebugInformation);
             }
             return response.IsValid;
