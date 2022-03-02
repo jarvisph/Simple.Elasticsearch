@@ -132,7 +132,7 @@ namespace Simple.Elasticsearch
             if (!response.IsValid)
             {
                 Console.WriteLine(response.DebugInformation);
-                throw new Exception(response.DebugInformation);
+                //throw new Exception(response.DebugInformation);
             }
             return response.IsValid;
         }
