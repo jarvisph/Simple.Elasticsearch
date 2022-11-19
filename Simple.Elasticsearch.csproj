@@ -1,13 +1,31 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>netstandard2.1</TargetFramework>
+    <TargetFramework>net6.0</TargetFramework>
     <Nullable>enable</Nullable>
     <GeneratePackageOnBuild>True</GeneratePackageOnBuild>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <Version>1.0.6</Version>
+    <Product>Simple.dotNet</Product>
+    <PackageId>Simple.dotNet.Elasticsearch</PackageId>
+    <Authors>Jarvis</Authors>
+    <Description></Description>
+    <Copyright></Copyright>
+    <PackageTags>linq to elasticsearch</PackageTags>
+    <AssemblyName>Simple.dotNet.Elasticsearch</AssemblyName>
+    <RootNamespace>Simple.Elasticsearch</RootNamespace>
+    <Company>Jarvis</Company>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="NEST" Version="7.15.0" />
+    <PackageReference Include="NEST" Version="7.17.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="README.md">
+      <Pack>True</Pack>
+      <PackagePath>\</PackagePath>
+    </None>
   </ItemGroup>
 
 </Project>

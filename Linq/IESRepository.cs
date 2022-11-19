@@ -9,38 +9,37 @@ namespace Simple.Elasticsearch.Linq
     /// <summary>
     /// ES仓储
     /// </summary>
-    public interface IESRepository<TEntity>
+    public interface IESRepository<TDocument>
     {
         #region Insert
-        public bool Insert(TEntity entity);
-        public bool Insert(IEnumerable<TEntity> entities);
+        public bool Insert(TDocument document);
+        public bool Insert(IEnumerable<TDocument> documents);
         #endregion
 
         #region Update
-        public bool Update(TEntity entity, Expression<Func<TEntity, bool>> predicate);
-        public bool Update(TEntity entity, Expression<Func<TEntity, bool>> predicate, Expression<Func<TEntity, bool>> fields);
-        public bool Update<TValue>(TValue value, Expression<Func<TEntity, TValue>> field, Expression<Func<TEntity, bool>> predicate);
+        public bool Update(TDocument entity, Expression<Func<TDocument, bool>> predicate);
+        public bool Update(TDocument entity, Expression<Func<TDocument, bool>> predicate, Expression<Func<TDocument, bool>> fields);
+        public bool Update<TValue>(TValue value, Expression<Func<TDocument, TValue>> field, Expression<Func<TDocument, bool>> predicate);
         #endregion
 
         #region Delete
 
-        public bool Delete(TEntity entity);
-        public bool Delete(Expression<Func<TEntity, bool>> predicate);
+        public bool Delete(Expression<Func<TDocument, bool>> predicate);
 
         #endregion
         #region Select
 
-        public IQueryable<TEntity> GetAll();
-        public IQueryable<TEntity> GetAll(Expression<Func<TEntity, bool>> predicate);
+        public IQueryable<TDocument> GetAll();
+        public IQueryable<TDocument> GetAll(Expression<Func<TDocument, bool>> predicate);
 
-        public TEntity FirstOrDefault();
-        public TEntity FirstOrDefault(Expression<Func<TEntity, bool>> predicate);
+        public TDocument FirstOrDefault();
+        public TDocument FirstOrDefault(Expression<Func<TDocument, bool>> predicate);
 
         public int Count();
-        public int Count(Expression<Func<TEntity, bool>> predicate);
+        public int Count(Expression<Func<TDocument, bool>> predicate);
 
         public bool Any();
-        public bool Any(Expression<Func<TEntity, bool>> predicate);
+        public bool Any(Expression<Func<TDocument, bool>> predicate);
         #endregion
 
     }

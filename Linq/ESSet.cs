@@ -1,47 +1,31 @@
 ﻿using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
-using System.Text;
 
 namespace Simple.Elasticsearch.Linq
 {
-    public abstract class ESSet<TEntity> : IQueryable<TEntity>, IESRepository<TEntity>
+    public abstract class ESSet<TDocument> : IESRepository<TDocument> where TDocument : class, IDocument
     {
-        public Type ElementType => throw new NotImplementedException();
-
-        public Expression Expression => throw new NotImplementedException();
-
-        public IQueryProvider Provider => throw new NotImplementedException();
-
+        public ESSet()
+        {
+        
+        }
         public abstract bool Any();
-        public abstract bool Any(Expression<Func<TEntity, bool>> expression);
+
+        public abstract bool Any(Expression<Func<TDocument, bool>> expression);
         public abstract int Count();
-        public abstract int Count(Expression<Func<TEntity, bool>> expression);
-        public abstract bool Delete(TEntity entity);
-        public abstract bool Delete(Expression<Func<TEntity, bool>> expression);
-        public abstract TEntity FirstOrDefault();
-        public abstract TEntity FirstOrDefault(Expression<Func<TEntity, bool>> expression);
-        public abstract IQueryable<TEntity> GetAll();
-        public abstract IQueryable<TEntity> GetAll(Expression<Func<TEntity, bool>> expression);
+        public abstract int Count(Expression<Func<TDocument, bool>> expression);
+        public abstract bool Delete(Expression<Func<TDocument, bool>> expression);
+        public abstract TDocument FirstOrDefault();
+        public abstract TDocument FirstOrDefault(Expression<Func<TDocument, bool>> expression);
+        public abstract IQueryable<TDocument> GetAll();
+        public abstract IQueryable<TDocument> GetAll(Expression<Func<TDocument, bool>> expression);
 
-        public IEnumerator<TEntity> GetEnumerator()
-        {
-            throw new NotImplementedException();
-        }
-
-        public abstract bool Insert(TEntity entity);
-        public abstract bool Insert(IEnumerable<TEntity> entities);
-        public abstract bool Update(TEntity entity, Expression<Func<TEntity, bool>> expression);
-        public abstract bool Update(TEntity entity, Expression<Func<TEntity, bool>> expression, Expression<Func<TEntity, bool>> fields);
-        public abstract bool Update<TValue>(TValue value, Expression<Func<TEntity, TValue>> field, Expression<Func<TEntity, bool>> expression);
-
-        IEnumerator IEnumerable.GetEnumerator()
-        {
-            throw new NotImplementedException();
-        }
-
-
+        public abstract bool Insert(TDocument entity);
+        public abstract bool Insert(IEnumerable<TDocument> entities);
+        public abstract bool Update(TDocument entity, Expression<Func<TDocument, bool>> expression);
+        public abstract bool Update(TDocument entity, Expression<Func<TDocument, bool>> expression, Expression<Func<TDocument, bool>> fields);
+        public abstract bool Update<TValue>(TValue value, Expression<Func<TDocument, TValue>> field, Expression<Func<TDocument, bool>> expression);
     }
 }

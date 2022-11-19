@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq.Expressions;
 using System.Text;
 using System.Linq;
+using Simple.Core.Extensions;
 
 namespace Simple.Elasticsearch.Linq
 {

@@ -1,12 +1,12 @@
 ﻿using Nest;
+using Simple.Core.Extensions;
+using Simple.Elasticsearch.Expressions;
+using Simple.Elasticsearch.Linq;
 using System;
 using System.Collections.Generic;
-using System.ComponentModel;
-using System.Globalization;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
-using System.Text.RegularExpressions;
 
 namespace Simple.Elasticsearch
 {
@@ -35,7 +35,7 @@ namespace Simple.Elasticsearch
             UpdateByQueryResponse response = client.UpdateByQuery<TDocument>(c => c.Index(indexname).Query(q => q.Bool(b => b.Must(queries)))
                                                                                    .Script(s => s.Source($"ctx._source.{fieldname}=params.{fieldname}")
                                                                                    .Params(new Dictionary<string, object> { { fieldname, value } })));
-            if (!response.IsValid) throw response.OriginalException;
+            if (!response.IsValid) throw new ElasticSearchException(response.DebugInformation);
             return response.IsValid;
         }
 
@@ -48,7 +48,7 @@ namespace Simple.Elasticsearch
         /// <param name="field"></param>
         /// <param name="queries"></param>
         /// <returns></returns>
-        public static bool Update<TDocument>(this IElasticClient client, TDocument document, Expression<Func<TDocument, object>> field, params Func<QueryContainerDescriptor<TDocument>, QueryContainer>[] queries) where TDocument : class, IDocument
+        private static bool Update<TDocument>(this IElasticClient client, TDocument document, Expression<Func<TDocument, object>> field, QueryContainer query) where TDocument : class, IDocument
         {
             if (document == null) return false;
             if (field == null) return false;
@@ -67,12 +67,55 @@ namespace Simple.Elasticsearch
                     param.Add(property.Name, property.GetValue(document));
                 }
             }
-            UpdateByQueryResponse response = client.UpdateByQuery<TDocument>(c => c.Index(indexname).Query(q => q.Bool(b => b.Must(queries)))
+            UpdateByQueryResponse response = client.UpdateByQuery<TDocument>(c => c.Index(indexname).Query(q => query)
                                                                                  .Script(s => s.Source(string.Join(";", fields.Select(c => $"ctx._source.{c}=params.{c}")))
                                                                                  .Params(param)));
-            if (!response.IsValid) throw response.OriginalException;
+            if (!response.IsValid) throw new ElasticSearchException(response.DebugInformation);
             return response.IsValid;
         }
+        /// <summary>
+        /// 修改字段内容
+        /// </summary>
+        /// <typeparam name="TDocument"></typeparam>
+        /// <param name="client"></param>
+        /// <param name="document"></param>
+        /// <param name="expression"></param>
+        /// <param name="field"></param>
+        /// <returns></returns>
+        public static bool Update<TDocument>(this IElasticClient client, TDocument document, Expression<Func<TDocument, bool>> expression, Expression<Func<TDocument, object>> field) where TDocument : class, IDocument
+        {
+            using (IElasticSearchExpressionVisitor<TDocument> visitor = new ElasticSearchExpressionVisitor<TDocument>(expression))
+            {
+                var query = visitor.Query();
+                return client.Update(document, field, query);
+            }
+        }
+        /// <summary>
+        /// 修改单个字段
+        /// </summary>
+        /// <typeparam name="TDocument"></typeparam>
+        /// <typeparam name="TValue"></typeparam>
+        /// <param name="client"></param>
+        /// <param name="field"></param>
+        /// <param name="value"></param>
+        /// <param name="expression"></param>
+        /// <returns></returns>
+        public static bool Update<TDocument, TValue>(this IElasticClient client, Expression<Func<TDocument, TValue>> field, TValue value, Expression<Func<TDocument, bool>> expression) where TDocument : class, IDocument
+        {
+            if (value == null) return false;
+            string indexname = typeof(TDocument).GetIndexName();
+            string fieldname = field.GetFieldName();
+            using (IElasticSearchExpressionVisitor<TDocument> visitor = new ElasticSearchExpressionVisitor<TDocument>(expression))
+            {
+                var query = visitor.Query();
+                UpdateByQueryResponse response = client.UpdateByQuery<TDocument>(c => c.Index(indexname).Query(q => query)
+                                                                            .Script(s => s.Source($"ctx._source.{fieldname}=params.{fieldname}")
+                                                                            .Params(new Dictionary<string, object>() { { fieldname, value } })));
+                if (!response.IsValid) throw new ElasticSearchException(response.DebugInformation);
+                return response.IsValid;
+            }
+        }
+
 
         /// <summary>
         /// 新增
@@ -86,7 +129,7 @@ namespace Simple.Elasticsearch
         {
             if (document == null) return false;
             ElasticSearchIndexAttribute? elasticsearch = typeof(TDocument).GetAttribute<ElasticSearchIndexAttribute>();
-            if (elasticsearch == null) throw new ArgumentNullException("缺失ElasticSearchIndex特性");
+            if (elasticsearch == null) throw new ElasticSearchException("Not ElasticSearchIndexAttribute");
             //检查是否已经创建索引
             if (indexDateTime.HasValue)
             {
@@ -100,7 +143,6 @@ namespace Simple.Elasticsearch
             IndexResponse response = client.Index(new IndexRequest<TDocument>(document, elasticsearch.IndexName));
             if (!response.IsValid)
             {
-                Console.WriteLine(response.DebugInformation);
                 throw new Exception(response.DebugInformation);
             }
             return response.IsValid;
@@ -117,7 +159,7 @@ namespace Simple.Elasticsearch
         public static bool Insert<TDocument>(this IElasticClient client, IEnumerable<TDocument> documents, DateTime? indexDateTime = null) where TDocument : class, IDocument
         {
             ElasticSearchIndexAttribute? elasticsearch = typeof(TDocument).GetAttribute<ElasticSearchIndexAttribute>();
-            if (elasticsearch == null) throw new ArgumentNullException("缺失ElasticSearchIndex特性");
+            if (elasticsearch == null) throw new ElasticSearchException("Not ElasticSearchIndexAttribute");
             if (indexDateTime.HasValue)
             {
                 elasticsearch.SetIndexTime(indexDateTime.Value);
@@ -130,10 +172,7 @@ namespace Simple.Elasticsearch
             client.WhenNotExistsAddIndex<TDocument>(elasticsearch);
             BulkResponse response = client.IndexMany(documents, elasticsearch.IndexName);
             if (!response.IsValid)
-            {
-                Console.WriteLine(response.DebugInformation);
-                //throw new Exception(response.DebugInformation);
-            }
+                throw new ElasticSearchException(response.DebugInformation);
             return response.IsValid;
         }
 
@@ -165,12 +204,34 @@ namespace Simple.Elasticsearch
             }
             DeleteByQueryResponse response = client.DeleteByQuery(action);
             if (!response.IsValid)
-            {
-                Console.WriteLine(response.DebugInformation);
-                throw new Exception(response.DebugInformation);
-            }
+                throw new ElasticSearchException(response.DebugInformation);
             return response.IsValid;
         }
+
+        /// <summary>
+        /// 删除
+        /// </summary>
+        /// <typeparam name="TDocument"></typeparam>
+        /// <param name="client"></param>
+        /// <param name="expression"></param>
+        /// <returns></returns>
+        public static bool Delete<TDocument>(this IElasticClient client, Expression<Func<TDocument, bool>> expression) where TDocument : class, IDocument
+        {
+            string indexname = typeof(TDocument).GetIndexName();
+            using (IElasticSearchExpressionVisitor<TDocument> visitor = new ElasticSearchExpressionVisitor<TDocument>(expression))
+            {
+                var query = visitor.Query();
+                Func<DeleteByQueryDescriptor<TDocument>, IDeleteByQueryRequest> action = (d) =>
+                {
+                    return d.Index(indexname).Query(q => query);
+                };
+                DeleteByQueryResponse response = client.DeleteByQuery(action);
+                if (!response.IsValid)
+                    throw new ElasticSearchException(response.DebugInformation);
+                return response.IsValid;
+            }
+        }
+
 
         /// <summary>
         /// 获取表总记录数
@@ -178,11 +239,21 @@ namespace Simple.Elasticsearch
         /// <typeparam name="TDocument"></typeparam>
         /// <param name="client"></param>
         /// <returns></returns>
-        public static int Count<TDocument>(this IElasticClient client) where TDocument : class, IDocument
+        public static int Count<TDocument>(this IElasticClient client) where TDocument : class
         {
             if (client == null) throw new NullReferenceException();
             string indexname = typeof(TDocument).GetIndexName();
             return (int)client.Count<TDocument>(c => c.Index(indexname)).Count;
+        }
+        public static int Count<TDocument>(this IElasticClient client, Expression<Func<TDocument, bool>> expression) where TDocument : class
+        {
+            if (client == null) throw new NullReferenceException();
+            string indexname = typeof(TDocument).GetIndexName();
+            using (IElasticSearchExpressionVisitor<TDocument> visitor = new ElasticSearchExpressionVisitor<TDocument>(expression))
+            {
+                var query = visitor.Query();
+                return (int)client.Count<TDocument>(c => c.Index(indexname).Query(q => query)).Count;
+            }
         }
         /// <summary>
         /// 根据条件获取表总记录数
@@ -190,11 +261,9 @@ namespace Simple.Elasticsearch
         /// <typeparam name="TDocument"></typeparam>
         /// <param name="client"></param>
         /// <returns></returns>
-        public static int Count<TDocument, TValue>(this IElasticClient client, TValue value, Expression<Func<TDocument, TValue>> field) where TDocument : class, IDocument
+        public static int Count<TDocument, TValue>(this IElasticClient client, TValue value, Expression<Func<TDocument, TValue>> field) where TDocument : class
         {
             if (client == null) throw new NullReferenceException();
-            if (value == null) throw new NullReferenceException();
-            if (field == null) throw new NullReferenceException();
             string indexname = typeof(TDocument).GetIndexName();
             return (int)client.Count<TDocument>(c => c.Index(indexname).Query(q => q.Term(field, value))).Count;
         }
@@ -205,11 +274,17 @@ namespace Simple.Elasticsearch
         /// <param name="client"></param>
         /// <param name="queries"></param>
         /// <returns></returns>
-        public static int Count<TDocument>(this IElasticClient client, params Func<QueryContainerDescriptor<TDocument>, QueryContainer>[] queries) where TDocument : class, IDocument
+        public static int Count<TDocument>(this IElasticClient client, params Func<QueryContainerDescriptor<TDocument>, QueryContainer>[] queries) where TDocument : class
         {
             if (client == null) throw new NullReferenceException();
             string indexname = typeof(TDocument).GetIndexName();
             return (int)client.Count<TDocument>(c => c.Index(indexname).Query(q => q.Bool(b => b.Must(queries)))).Count;
+        }
+        public static int Count<TDocument>(this IElasticClient client, QueryContainer query) where TDocument : class
+        {
+            if (client == null) throw new NullReferenceException();
+            string indexname = typeof(TDocument).GetIndexName();
+            return (int)client.Count<TDocument>(c => c.Index(indexname).Query(q => query)).Count;
         }
         /// <summary>
         /// 查询表记录数（指定查询条件）
@@ -218,7 +293,7 @@ namespace Simple.Elasticsearch
         /// <param name="client"></param>
         /// <param name="search"></param>
         /// <returns></returns>
-        public static int Count<TDocument>(this IElasticClient client, Func<SearchDescriptor<TDocument>, ISearchRequest> search) where TDocument : class, IDocument
+        public static int Count<TDocument>(this IElasticClient client, Func<SearchDescriptor<TDocument>, ISearchRequest> search) where TDocument : class
         {
             if (client == null) throw new NullReferenceException();
             if (search == null) throw new NullReferenceException();
@@ -243,15 +318,148 @@ namespace Simple.Elasticsearch
             };
             return (int)client.Count<TDocument>(count).Count;
         }
+
+        /// <summary>
+        /// 获取最小值
+        /// </summary>
+        /// <typeparam name="TDocument"></typeparam>
+        /// <param name="client"></param>
+        /// <param name="expression"></param>
+        /// <returns></returns>
+        public static TValue Min<TDocument, TValue>(this IElasticClient client, Expression<Func<TDocument, TValue>> expression) where TDocument : class
+        {
+            string field = expression.GetFieldName();
+            return client.Min<TDocument, TValue>(new QueryContainer(), new AggregationContainerDescriptor<TDocument>().Min(field, t => t.Field(expression)));
+        }
+        public static TValue Min<TDocument, TValue>(this IElasticClient client, Expression<Func<TDocument, TValue>> keySelect, Expression<Func<TDocument, bool>> expression) where TDocument : class
+        {
+            string field = keySelect.GetFieldName();
+            using (IElasticSearchExpressionVisitor<TDocument> visitor = new ElasticSearchExpressionVisitor<TDocument>(expression))
+            {
+                var query = visitor.Query();
+                return client.Min<TDocument, TValue>(query, new AggregationContainerDescriptor<TDocument>().Min(field, t => t.Field(expression)));
+            }
+        }
+        public static TValue Min<TDocument, TValue>(this IElasticClient client, QueryContainer query, Expression<Func<TDocument, TValue>> expression) where TDocument : class
+        {
+            string field = expression.GetFieldName();
+            return client.Min<TDocument, TValue>(query, new AggregationContainerDescriptor<TDocument>().Min(field, t => t.Field(expression)));
+        }
+        public static TValue Min<TDocument, TValue>(this IElasticClient client, QueryContainer query, AggregationContainerDescriptor<TDocument> aggregation) where TDocument : class
+        {
+            if (client == null) throw new NullReferenceException();
+            string indexname = typeof(TDocument).GetIndexName();
+            ISearchResponse<TDocument> response = client.Search<TDocument>(s => s.Index(indexname).Query(q => query).Aggregations(aggs => aggregation));
+            if (!response.IsValid)
+                throw new ElasticSearchException(response.DebugInformation);
+            IDictionary<string, IAggregationContainer> aggs = ((IAggregationContainer)aggregation).Aggregations;
+            if (aggs.Keys.Count == 0) throw new ElasticSearchException("Not specify field");
+            ValueAggregate value = response.Aggregations.Min(aggs.Keys.First());
+            if (value == null || value.Value == null) return default;
+            return value.Value.Value.ToValue<TValue>();
+        }
+
+        /// <summary>
+        /// 获取最大值
+        /// </summary>
+        /// <typeparam name="TDocument"></typeparam>
+        /// <param name="client"></param>
+        /// <param name="expression"></param>
+        /// <returns></returns>
+        /// <exception cref="NullReferenceException"></exception>
+        public static TValue Max<TDocument, TValue>(this IElasticClient client, Expression<Func<TDocument, TValue>> expression) where TDocument : class
+        {
+            if (client == null) throw new NullReferenceException();
+            string field = expression.GetFieldName();
+            return client.Max<TDocument, TValue>(new QueryContainer(), new AggregationContainerDescriptor<TDocument>().Max(field, t => t.Field(expression)));
+        }
+        public static TValue Max<TDocument, TValue>(this IElasticClient client, Expression<Func<TDocument, TValue>> keySelect, Expression<Func<TDocument, bool>> expression) where TDocument : class
+        {
+            string field = keySelect.GetFieldName();
+            using (IElasticSearchExpressionVisitor<TDocument> visitor = new ElasticSearchExpressionVisitor<TDocument>(expression))
+            {
+                var query = visitor.Query();
+                return client.Max<TDocument, TValue>(query, new AggregationContainerDescriptor<TDocument>().Max(field, t => t.Field(expression)));
+            }
+        }
+        public static TValue Max<TDocument, TValue>(this IElasticClient client, QueryContainer query, Expression<Func<TDocument, TValue>> expression) where TDocument : class
+        {
+            string field = expression.GetFieldName();
+            return client.Max<TDocument, TValue>(query, new AggregationContainerDescriptor<TDocument>().Max(field, t => t.Field(expression)));
+        }
+        public static TValue Max<TDocument, TValue>(this IElasticClient client, QueryContainer query, AggregationContainerDescriptor<TDocument> aggregation) where TDocument : class
+        {
+            if (client == null) throw new NullReferenceException();
+            string indexname = typeof(TDocument).GetIndexName();
+            ISearchResponse<TDocument> response = client.Search<TDocument>(s => s.Index(indexname).Query(q => query).Aggregations(aggs => aggregation));
+            if (!response.IsValid)
+                throw new ElasticSearchException(response.DebugInformation);
+            IDictionary<string, IAggregationContainer> aggs = ((IAggregationContainer)aggregation).Aggregations;
+            if (aggs.Keys.Count == 0) throw new ElasticSearchException("Not specify field");
+            ValueAggregate value = response.Aggregations.Max(aggs.Keys.First());
+            if (value == null || value.Value == null) return default;
+            return value.Value.Value.ToValue<TValue>();
+        }
+        /// <summary>
+        /// 平均值
+        /// </summary>
+        /// <typeparam name="TDocument"></typeparam>
+        /// <param name="client"></param>
+        /// <param name="expression"></param>
+        /// <returns></returns>
+        /// <exception cref="NullReferenceException"></exception>
+        public static TValue Average<TDocument, TValue>(this IElasticClient client, Expression<Func<TDocument, TValue>> expression) where TDocument : class
+        {
+            if (client == null) throw new NullReferenceException();
+            string field = expression.GetFieldName();
+            return client.Average<TDocument, TValue>(new QueryContainer(), new AggregationContainerDescriptor<TDocument>().Average(field, t => t.Field(expression)));
+        }
+        public static TValue Average<TDocument, TValue>(this IElasticClient client, Expression<Func<TDocument, TValue>> keySelect, Expression<Func<TDocument, bool>> expression) where TDocument : class
+        {
+            string field = keySelect.GetFieldName();
+            using (IElasticSearchExpressionVisitor<TDocument> visitor = new ElasticSearchExpressionVisitor<TDocument>(expression))
+            {
+                var query = visitor.Query();
+                return client.Average<TDocument, TValue>(query, new AggregationContainerDescriptor<TDocument>().Average(field, t => t.Field(expression)));
+            }
+        }
+        public static TValue Average<TDocument, TValue>(this IElasticClient client, QueryContainer query, Expression<Func<TDocument, TValue>> expression) where TDocument : class
+        {
+            string field = expression.GetFieldName();
+            return client.Average<TDocument, TValue>(query, new AggregationContainerDescriptor<TDocument>().Average(field, t => t.Field(expression)));
+        }
+        public static TValue Average<TDocument, TValue>(this IElasticClient client, QueryContainer query, AggregationContainerDescriptor<TDocument> aggregation) where TDocument : class
+        {
+            if (client == null) throw new NullReferenceException();
+            string indexname = typeof(TDocument).GetIndexName();
+            ISearchResponse<TDocument> response = client.Search<TDocument>(s => s.Index(indexname).Query(q => query).Aggregations(aggs => aggregation));
+            if (!response.IsValid)
+                throw new ElasticSearchException(response.DebugInformation);
+            IDictionary<string, IAggregationContainer> aggs = ((IAggregationContainer)aggregation).Aggregations;
+            if (aggs.Keys.Count == 0) throw new ElasticSearchException("Not specify field");
+            ValueAggregate value = response.Aggregations.Average(aggs.Keys.First());
+            if (value == null || value.Value == null) return default;
+            return value.Value.Value.ToValue<TValue>();
+        }
+
+
         /// <summary>
         /// 查询表是否存在
         /// </summary>
         /// <typeparam name="TDocument"></typeparam>
         /// <param name="queries"></param>
         /// <returns></returns>
-        public static bool Any<TDocument>(this IElasticClient client, params Func<QueryContainerDescriptor<TDocument>, QueryContainer>[] queries) where TDocument : class, IDocument
+        public static bool Any<TDocument>(this IElasticClient client, params Func<QueryContainerDescriptor<TDocument>, QueryContainer>[] queries) where TDocument : class
         {
             return client.Count(queries) > 0;
+        }
+        public static bool Any<TDocument>(this IElasticClient client, Expression<Func<TDocument, bool>> expression) where TDocument : class
+        {
+            return client.Count(expression) > 0;
+        }
+        public static bool Any<TDocument>(this IElasticClient client, QueryContainer query) where TDocument : class
+        {
+            return client.Count<TDocument>(query) > 0;
         }
         /// <summary>
         /// 查询表是否存在（指定查询条件）
@@ -260,7 +468,7 @@ namespace Simple.Elasticsearch
         /// <param name="client"></param>
         /// <param name="search"></param>
         /// <returns></returns>
-        public static bool Any<TDocument>(this IElasticClient client, Func<SearchDescriptor<TDocument>, ISearchRequest> search) where TDocument : class, IDocument
+        public static bool Any<TDocument>(this IElasticClient client, Func<SearchDescriptor<TDocument>, ISearchRequest> search) where TDocument : class
         {
             return client.Count(search) > 0;
         }
@@ -273,7 +481,7 @@ namespace Simple.Elasticsearch
         /// <param name="client"></param>
         /// <param name="value"></param>
         /// <returns></returns>
-        public static bool Any<TDocument, TValue>(this IElasticClient client, TValue value, Expression<Func<TDocument, TValue>> field) where TDocument : class, IDocument
+        public static bool Any<TDocument, TValue>(this IElasticClient client, TValue value, Expression<Func<TDocument, TValue>> field) where TDocument : class
         {
             return client.Count(value, field) > 0;
         }
@@ -284,11 +492,26 @@ namespace Simple.Elasticsearch
         /// <typeparam name="TDocument"></typeparam>
         /// <param name="client"></param>
         /// <returns>没有则为null</returns>
-        public static TDocument? FirstOrDefault<TDocument>(this IElasticClient client, params Func<QueryContainerDescriptor<TDocument>, QueryContainer>[] queries) where TDocument : class, IDocument
+        public static TDocument? FirstOrDefault<TDocument>(this IElasticClient client, params Func<QueryContainerDescriptor<TDocument>, QueryContainer>[] queries) where TDocument : class
         {
             if (client == null) throw new NullReferenceException();
             string indexname = typeof(TDocument).GetIndexName();
             return client.Search<TDocument>(s => s.Index(indexname).Query(q => q.Bool(b => b.Must(queries))).Size(1)).Documents?.FirstOrDefault();
+        }
+        public static TDocument? FirstOrDefault<TDocument>(this IElasticClient client, QueryContainer query) where TDocument : class
+        {
+            if (client == null) throw new NullReferenceException();
+            string indexname = typeof(TDocument).GetIndexName();
+            return client.Search<TDocument>(s => s.Index(indexname).Query(q => query).Size(1)).Documents?.FirstOrDefault();
+        }
+        public static TDocument? FirstOrDefault<TDocument>(this IElasticClient client, Expression<Func<TDocument, bool>> expression) where TDocument : class
+        {
+            if (client == null) throw new NullReferenceException();
+            using (IElasticSearchExpressionVisitor<TDocument> visitor = new ElasticSearchExpressionVisitor<TDocument>(expression))
+            {
+                var query = visitor.Query();
+                return client.FirstOrDefault<TDocument>(query);
+            }
         }
 
         /// <summary>
@@ -306,6 +529,7 @@ namespace Simple.Elasticsearch
             string indexname = typeof(TDocument).GetIndexName();
             return client.Search<TDocument>(s => s.Index(indexname).Query(q => q.Bool(b => b.Must(queries))).Size(1).Select(field)).Documents?.FirstOrDefault();
         }
+
         /// <summary>
         /// 获取所有数据
         /// </summary>
@@ -321,32 +545,22 @@ namespace Simple.Elasticsearch
             var searchResponse = client.Search<TDocument>(s => s.Index(indexname).Size(size).Scroll(scrollTime).Query(q => q.Bool(b => b.Must(queries))));
             return client.Scroll(searchResponse, size, scrollTime);
         }
-        /// <summary>
-        /// 聚合
-        /// </summary>
-        /// <typeparam name="TDocument"></typeparam>
-        /// <typeparam name="TValue"></typeparam>
-        /// <param name="client"></param>
-        /// <param name="field"></param>
-        /// <param name="queries"></param>
-        /// <returns></returns>
-        public static IEnumerable<TValue> GroupBy<TDocument, TValue>(this IElasticClient client, Expression<Func<TDocument, TValue>> field, params Func<QueryContainerDescriptor<TDocument>, QueryContainer>[] queries) where TDocument : class where TValue : struct
-        {
-            string indexname = typeof(TDocument).GetIndexName();
-            int size = 2147483647;//size设置支持最大数量： 2147483647
 
-            string filedname = field.GetFieldName();
-            var response = client.Search<TDocument>(s => s.Index(indexname).Size(0).Query(q => q.Bool(b => b.Must(queries)))
-                                       .Aggregations(aggs => aggs.Terms("group_by_script", t => t.Field(field).Order(c => c.Ascending(filedname)).ShowTermDocCountError(true).Size(size))));
-            if (!response.IsValid)
+        public static IEnumerable<TDocument> GetAll<TDocument>(this IElasticClient client, Expression<Func<TDocument>> expression) where TDocument : class
+        {
+            using (IElasticSearchExpressionVisitor<TDocument> visitor = new ElasticSearchExpressionVisitor<TDocument>(expression))
             {
-                throw response.OriginalException;
+                var query = visitor.Query();
+                return client.GetAll<TDocument>(query);
             }
-            var buckets = response.Aggregations.Terms("group_by_script").Buckets;
-            foreach (var item in buckets)
-            {
-                yield return item.Key.ToValue<TValue>();
-            }
+        }
+        public static IEnumerable<TDocument> GetAll<TDocument>(this IElasticClient client, QueryContainer query) where TDocument : class
+        {
+            var scrollTime = new Time(TimeSpan.FromSeconds(30));
+            string indexname = typeof(TDocument).GetIndexName();
+            int size = 1000;
+            var searchResponse = client.Search<TDocument>(s => s.Index(indexname).Size(size).Scroll(scrollTime).Query(q => query));
+            return client.Scroll(searchResponse, size, scrollTime);
         }
 
         /// <summary>
@@ -415,16 +629,16 @@ namespace Simple.Elasticsearch
             return query;
         }
 
-        ///// <summary>
-        ///// 创建一个空的Queryable
-        ///// </summary>
-        ///// <typeparam name="TDocument"></typeparam>
-        ///// <param name="client"></param>
-        ///// <returns></returns>
-        //public static IQueryable<TDocument> Query<TDocument>(this IElasticClient client) where TDocument : class, IDocument
-        //{
-        //    return new ElasticSearchQueryable<TDocument>(new ElasticSearchQueryProvider(client));
-        //}
+        /// <summary>
+        /// 创建一个空的ElasticSearchQueryable
+        /// </summary>
+        /// <typeparam name="TDocument"></typeparam>
+        /// <param name="client"></param>
+        /// <returns></returns>
+        public static IElasticSearchQueryable<TDocument> Query<TDocument>(this IElasticClient client) where TDocument : class, IDocument
+        {
+            return new ElasticSearchQueryProvider<TDocument>(client);
+        }
         /// <summary>
         /// 查询（真实查询）
         /// </summary>
@@ -864,6 +1078,7 @@ namespace Simple.Elasticsearch
             }
             return query;
         }
+
         /// <summary>
         /// 降序
         /// </summary>
@@ -1004,6 +1219,15 @@ namespace Simple.Elasticsearch
                 return search.Invoke(s.Paged(page, limit));
             };
         }
+        public static IEnumerable<TDocument> Paged<TDocument>(this IElasticClient client, Type type, QueryContainer query, SortDescriptor<TDocument> sort, int page, int size, out long total) where TDocument : class
+        {
+            total = 0;
+            string indexname = type.GetIndexName();
+            var response = client.Search<TDocument>(s => s.Index(indexname).Query(q => query).Size(size).From((page - 1) * size).Sort(s => sort));
+            if (!response.IsValid) throw new ElasticSearchException(response.DebugInformation);
+            total = response.Total;
+            return response.Documents;
+        }
         /// <summary>
         /// 根据字段分组
         /// </summary>
@@ -1083,6 +1307,150 @@ namespace Simple.Elasticsearch
             };
         }
 
+        /// <summary>
+        /// 聚合
+        /// </summary>
+        /// <typeparam name="TDocument"></typeparam>
+        /// <typeparam name="TValue"></typeparam>
+        /// <param name="client"></param>
+        /// <param name="field"></param>
+        /// <param name="queries"></param>
+        /// <returns></returns>
+        public static IEnumerable<TValue> GroupBy<TDocument, TValue>(this IElasticClient client, Expression<Func<TDocument, TValue>> field, params Func<QueryContainerDescriptor<TDocument>, QueryContainer>[] queries) where TDocument : class where TValue : struct
+        {
+            string indexname = typeof(TDocument).GetIndexName();
+            int size = 2147483647;//size设置支持最大数量： 2147483647
+
+            string filedname = field.GetFieldName();
+            var response = client.Search<TDocument>(s => s.Index(indexname).Size(0).Query(q => q.Bool(b => b.Must(queries)))
+                                       .Aggregations(aggs => aggs.Terms("group_by_script", t => t.Field(field).Order(c => c.Ascending(filedname)).ShowTermDocCountError(true).Size(size))));
+            if (!response.IsValid)
+            {
+                throw response.OriginalException;
+            }
+            var buckets = response.Aggregations.Terms("group_by_script").Buckets;
+            foreach (var item in buckets)
+            {
+                yield return item.Key.ToValue<TValue>();
+            }
+        }
+
+        public static IEnumerable<TDocument> GroupBy<TDocument>(this IElasticClient client, Type type, QueryContainer query, AggregationContainerDescriptor<TDocument> aggregation, List<Tuple<string, string, Type>>? select) where TDocument : class
+        {
+            string indexname = type.GetIndexName();
+            var response = client.Search<TDocument>(s => s.Index(indexname).Size(0).Query(q => query)
+                                  .Aggregations(agga => aggregation));
+            if (select == null) yield break;
+            if (!response.IsValid)
+                throw new ElasticSearchException(response.DebugInformation);
+            IDictionary<string, IAggregationContainer> _dictionary = ((IAggregationContainer)aggregation).Aggregations;
+            KeyValuePair<string, IAggregationContainer> _aggs = _dictionary.FirstOrDefault();
+            string[] array = _aggs.Key.Split("_");
+            List<object> args;
+            if (select.Any(c => c.Item2 == "DateTime"))
+            {
+                MultiBucketAggregate<DateHistogramBucket> _bucket = response.Aggregations.DateHistogram(_aggs.Key);
+                foreach (DateHistogramBucket bucket in _bucket.Buckets)
+                {
+                    if (_aggs.Value.Aggregations.Any())
+                    {
+                        var _terms_aggs = _aggs.Value.Aggregations.FirstOrDefault();
+                        array = _terms_aggs.Key.Split('_');
+                        foreach (var item in bucket.Terms(_terms_aggs.Key).Buckets)
+                        {
+                            args = new List<object>();
+                            args.ConvertAggregationValue(item, select, array, bucket);
+                            yield return (TDocument)Activator.CreateInstance(typeof(TDocument), args.ToArray());
+                        }
+                    }
+                    else
+                    {
+                        args = new List<object>();
+                        args.ConvertAggregationValue(bucket, select, array);
+                        yield return (TDocument)Activator.CreateInstance(typeof(TDocument), args.ToArray());
+                    }
+                }
+            }
+            else
+            {
+                TermsAggregate<string> _bucket = response.Aggregations.Terms(_aggs.Key);
+                if (_bucket == null)
+                {
+                    AggregateDictionary dictionary = response.Aggregations;
+                    args = new List<object>();
+                    args.ConvertAggregationValue(dictionary, select);
+                    yield return (TDocument)Activator.CreateInstance(typeof(TDocument), args.ToArray());
+                }
+                else
+                {
+                    foreach (KeyedBucket<string> item in _bucket.Buckets)
+                    {
+                        args = new List<object>();
+                        args.ConvertAggregationValue(item, select, array);
+                        yield return (TDocument)Activator.CreateInstance(typeof(TDocument), args.ToArray());
+                    }
+                }
+            }
+        }
+        /// <summary>
+        /// 聚合数据转Select匿名对象数据
+        /// </summary>
+        /// <param name="args"></param>
+        /// <param name="bucket"></param>
+        /// <param name="cell"></param>
+        /// <exception cref="ElasticSearchException"></exception>
+        private static void ConvertAggregationValue(this List<object> args, AggregateDictionary bucket, List<Tuple<string, string, Type>> select, string[]? script = null, DateHistogramBucket? date_bucket = null)
+        {
+            foreach (var item in select)
+            {
+                object? value;
+                switch (item.Item2)
+                {
+                    case "Count":
+                        if (bucket is KeyedBucket<string>)
+                        {
+                            value = ((KeyedBucket<string>)bucket).DocCount;
+                        }
+                        else
+                        {
+                            value = bucket.Count;
+                        }
+                        break;
+                    case "Sum":
+                        value = bucket.Sum(item.Item1).Value ?? 0;
+                        break;
+                    case "Max":
+                        value = bucket.Max(item.Item1).Value ?? 0;
+                        break;
+                    case "Min":
+                        value = bucket.Min(item.Item1).Value ?? 0;
+                        break;
+                    case "Average":
+                        value = bucket.Average(item.Item1).Value ?? 0;
+                        break;
+                    case "Key":
+                        KeyedBucket<string> keyBucket = (KeyedBucket<string>)bucket;
+                        string[] keys = keyBucket.Key.Split("-");
+                        int index = Array.IndexOf(script, item.Item1);
+                        value = index == -1 ? null : keys[index];
+                        break;
+                    case "DateTime":
+                        if (date_bucket == null)
+                        {
+                            DateHistogramBucket date_histogram = (DateHistogramBucket)bucket;
+                            value = date_histogram.KeyAsString;
+                        }
+                        else
+                        {
+                            value = date_bucket.KeyAsString;
+                        }
+                        break;
+                    default:
+                        throw new ElasticSearchException($"Not implemented {item.Item2}");
+                }
+                args.Add(value.GetValue(item.Item3));
+            }
+        }
         /// <summary>
         /// 组装聚合的字段
         /// </summary>
@@ -1522,8 +1890,8 @@ namespace Simple.Elasticsearch
         /// <returns></returns>
         public static string GetIndexName(this Type type)
         {
-            ElasticSearchIndexAttribute elasticsearch = type.GetAttribute<ElasticSearchIndexAttribute>();
-            if (elasticsearch == null) throw new Exception("not index name");
+            ElasticSearchIndexAttribute? elasticsearch = type.GetAttribute<ElasticSearchIndexAttribute>();
+            if (elasticsearch == null) throw new ElasticSearchException(nameof(ElasticSearchIndexAttribute));
             return elasticsearch.IndexName;
         }
 
@@ -1534,9 +1902,10 @@ namespace Simple.Elasticsearch
         /// <typeparam name="TValue"></typeparam>
         /// <param name="field"></param>
         /// <returns></returns>
-        private static string GetFieldName<TDocument, TValue>(this Expression<Func<TDocument, TValue>> field) where TDocument : class
+        private static string GetFieldName<TDocument, TValue>(this Expression<Func<TDocument, TValue>> field)
         {
-            return field.GetPropertyInfo().GetFieldName();
+            PropertyInfo property = field.GetPropertyInfo();
+            return property.GetFieldName();
         }
         /// <summary>
         /// 索引不存在时，创建索引
@@ -1644,7 +2013,7 @@ namespace Simple.Elasticsearch
         /// </summary>
         /// <param name="property"></param>
         /// <returns></returns>
-        private static string? GetFieldName(this PropertyInfo property)
+        public static string? GetFieldName(this PropertyInfo property)
         {
             NumberAttribute number = property.GetAttribute<NumberAttribute>();
             if (number != null)
@@ -1680,288 +2049,6 @@ namespace Simple.Elasticsearch
             }
             return property.Name;
         }
-
-        /// <summary>
-        /// 获取类的特性
-        /// </summary>
-        /// <typeparam name="T"></typeparam>
-        /// <param name="obj"></param>
-        /// <returns></returns>
-        private static T? GetAttribute<T>(this object obj) where T : class
-        {
-            if (obj == null) return default;
-            ICustomAttributeProvider custom = obj is ICustomAttributeProvider ? (ICustomAttributeProvider)obj : (ICustomAttributeProvider)obj.GetType();
-            foreach (object t in custom.GetCustomAttributes(true))
-            {
-                if (t.GetType().Equals(typeof(T))) return (T)t;
-            }
-            return default;
-        }
-        /// <summary>
-        /// 获取expression的属性
-        /// </summary>
-        /// <typeparam name="T"></typeparam>
-        /// <typeparam name="TKey"></typeparam>
-        /// <param name="expression"></param>
-        /// <returns></returns>
-        private static PropertyInfo GetPropertyInfo<T, TKey>(this Expression<Func<T, TKey>> expression) where T : class
-        {
-            PropertyInfo property = null;
-            switch (expression.Body.NodeType)
-            {
-                case ExpressionType.Convert:
-                    property = (PropertyInfo)((MemberExpression)((UnaryExpression)expression.Body).Operand).Member;
-                    break;
-                case ExpressionType.MemberAccess:
-                    property = (PropertyInfo)((MemberExpression)expression.Body).Member;
-                    break;
-            }
-            return property;
-        }
-        /// <summary>
-        /// 获取Propertys
-        /// </summary>
-        /// <typeparam name="TSource"></typeparam>
-        /// <typeparam name="Key"></typeparam>
-        /// <param name="exp"></param>
-        /// <returns></returns>
-        public static IEnumerable<PropertyInfo> GetPropertys<TSource, Key>(this Expression<Func<TSource, Key>> expression) where TSource : class
-        {
-            NewExpression? node = expression.Body as NewExpression;
-            if (node != null)
-            {
-                foreach (MemberInfo member in node.Members)
-                {
-                    yield return (PropertyInfo)member;
-                }
-            }
-            else
-            {
-                yield return expression.GetPropertyInfo();
-            }
-        }
-
-        /// <summary>
-        /// 将给定对象转换为不同类型
-        /// </summary>
-        /// <param name="obj"></param>
-        /// <typeparam name="T"></typeparam>
-        /// <returns>Converted object</returns>
-        private static T ToValue<T>(this object obj)
-        {
-            if (typeof(T) == typeof(Guid))
-            {
-                if (obj == null)
-                {
-                    obj = Guid.Empty;
-                }
-                return (T)TypeDescriptor.GetConverter(typeof(T)).ConvertFromInvariantString(obj.ToString());
-            }
-
-            return (T)Convert.ChangeType(obj, typeof(T), CultureInfo.InvariantCulture);
-        }
-        /// <summary>
-        /// 判断是否标记特性
-        /// </summary>
-        /// <typeparam name="T"></typeparam>
-        /// <param name="obj"></param>
-        /// <returns></returns>
-        private static bool HasAttribute<T>(this Object obj) where T : Attribute
-        {
-            ICustomAttributeProvider custom = obj is ICustomAttributeProvider ? (ICustomAttributeProvider)obj : (ICustomAttributeProvider)obj.GetType();
-            foreach (var t in custom.GetCustomAttributes(false))
-            {
-                if (t.GetType().Equals(typeof(T))) return true;
-            }
-            return false;
-        }
-        /// <summary>
-        /// String转换枚举
-        /// </summary>
-        /// <typeparam name="T"></typeparam>
-        /// <param name="value"></param>
-        /// <returns></returns>
-        public static T ToEnum<T>(this string value) where T : IComparable, IFormattable, IConvertible
-        {
-            if (string.IsNullOrWhiteSpace(value) || !typeof(T).IsEnum) return default;
-
-            Type type = typeof(T);
-
-            if (type.HasAttribute<FlagsAttribute>())
-            {
-                return ToFlagEnum<T>(value.Split(",").Where(c => !string.IsNullOrWhiteSpace(c) && Enum.IsDefined(type, c.Trim())).Select(c => Enum.Parse(type, value)).ToArray());
-            }
-            return Enum.IsDefined(type, value) ? (T)Enum.Parse(type, value) : default(T);
-        }
-        /// <summary>
-        /// 转成flag枚举
-        /// </summary>
-        /// <typeparam name="T"></typeparam>
-        /// <param name="enums"></param>
-        /// <returns></returns>
-        private static T ToFlagEnum<T>(object[] enums) where T : IComparable, IFormattable, IConvertible
-        {
-            T result;
-            switch (Enum.GetUnderlyingType(typeof(T)).Name)
-            {
-                case "Int16":
-                    short int16 = 0;
-                    foreach (object value in enums) int16 |= (short)value;
-                    result = (T)Enum.ToObject(typeof(T), int16);
-                    break;
-                case "Int32":
-                    int int32 = 0;
-                    foreach (object value in enums) int32 |= (int)value;
-                    result = (T)Enum.ToObject(typeof(T), int32);
-                    break;
-                case "Int64":
-                    long int64 = 0;
-                    foreach (object value in enums) int64 |= (long)value;
-                    result = (T)Enum.ToObject(typeof(T), int64);
-                    break;
-                case "Byte":
-                    byte bt = 0;
-                    foreach (object value in enums) bt |= (byte)value;
-                    result = (T)Enum.ToObject(typeof(T), bt);
-                    break;
-                default:
-                    result = default;
-                    break;
-            }
-            return result;
-        }
-        public static object ToEnum(this string value, Type type)
-        {
-            if (string.IsNullOrWhiteSpace(value) || !type.IsEnum) return default;
-            if (int.TryParse(value, out int int_value))
-            {
-                return Enum.ToObject(type, int_value);
-            }
-            else if (byte.TryParse(value, out byte byte_value))
-            {
-                return Enum.ToObject(type, byte_value);
-            }
-            return Enum.IsDefined(type, value) ? Enum.Parse(type, value) : default;
-        }
-
-        /// <summary>
-        /// 把字符串转化成为数字数组
-        /// </summary>
-        /// <param name="str">用逗号隔开的数字</param>
-        /// <param name="split"></param>
-        /// <returns></returns>
-        public static T[] GetArray<T>(this string str, char split = ',')
-        {
-            if (str == null) return Array.Empty<T>();
-            str = str.Replace(" ", string.Empty);
-            string regex = null;
-            T[] result = Array.Empty<T>();
-            switch (typeof(T).Name)
-            {
-                case "Int32":
-                case "Byte":
-                    regex = string.Format(@"(\d+{0})?\d$", split);
-                    if (Regex.IsMatch(str, regex, RegexOptions.IgnoreCase))
-                    {
-                        result = str.Split(split).Where(t => t.IsType<T>()).ToList().ConvertAll(t => (T)Convert.ChangeType(t, typeof(T))).ToArray();
-                    }
-                    break;
-                case "Guid":
-                    regex = @"([0-9a-f]{8}\-[0-9a-f]{4}\-[0-9a-f]{4}\-[0-9a-f]{4}\-[0-9a-f]{12}" + split + @")?([0-9a-f]{8}\-[0-9a-f]{4}\-[0-9a-f]{4}\-[0-9a-f]{4}\-[0-9a-f]{12})$";
-                    if (Regex.IsMatch(str, regex, RegexOptions.IgnoreCase))
-                    {
-                        result = str.Split(split).ToList().ConvertAll(t => (T)((object)Guid.Parse(t))).ToArray();
-                    }
-                    break;
-                case "Decimal":
-                    regex = string.Format(@"([0-9\.]+{0})?\d+$", split);
-                    if (Regex.IsMatch(str, regex, RegexOptions.IgnoreCase))
-                    {
-                        result = str.Split(split).ToList().ConvertAll(t => (T)Convert.ChangeType(t, typeof(T))).ToArray();
-                    }
-                    break;
-                case "Double":
-                    result = str.Split(split).Where(t => t.IsType<T>()).Select(t => (T)Convert.ChangeType(t, typeof(T))).ToArray();
-                    break;
-                case "String":
-                    result = str.Split(split).ToList().FindAll(t => !string.IsNullOrEmpty(t.Trim())).ConvertAll(t => (T)((object)t.Trim())).ToArray();
-                    break;
-                case "DateTime":
-                    result = str.Split(split).ToList().FindAll(t => t.IsType<T>()).ConvertAll(t => (T)((object)DateTime.Parse(t))).ToArray();
-                    break;
-                default:
-                    if (typeof(T).IsEnum)
-                    {
-                        result = str.Split(split).Where(t => Enum.IsDefined(typeof(T), t)).Select(t => (T)Enum.Parse(typeof(T), t)).ToArray();
-                    }
-                    break;
-            }
-
-            return result;
-        }
-
-        public static bool IsType<T>(this string value)
-        {
-            return IsType(value, typeof(T));
-        }
-
-        public static bool IsType(this string value, Type type)
-        {
-            bool isType;
-            switch (type.Name)
-            {
-                case "Int32":
-                    int int32;
-                    isType = int.TryParse(value, out int32);
-                    break;
-                case "Int16":
-                    short int16;
-                    isType = short.TryParse(value, out int16);
-                    break;
-                case "Int64":
-                    long int64;
-                    isType = long.TryParse(value, out int64);
-                    break;
-                case "Guid":
-                    Guid guid;
-                    isType = Guid.TryParse(value, out guid);
-                    break;
-                case "DateTime":
-                    DateTime dateTime;
-                    isType = DateTime.TryParse(value, out dateTime);
-                    break;
-                case "Decimal":
-                    decimal money;
-                    isType = Decimal.TryParse(value, out money);
-                    break;
-                case "Double":
-                    double doubleValue;
-                    isType = Double.TryParse(value, out doubleValue);
-                    break;
-                case "String":
-                    isType = true;
-                    break;
-                case "Boolean":
-                    isType = Regex.IsMatch(value, "1|0|true|false", RegexOptions.IgnoreCase);
-                    break;
-                case "Byte":
-                    byte byteValue;
-                    isType = byte.TryParse(value, out byteValue);
-                    break;
-                default:
-                    if (type.IsEnum)
-                    {
-                        isType = Enum.IsDefined(type, value);
-                    }
-                    else
-                    {
-                        throw new Exception("方法暂时未能检测该种类型" + type.FullName);
-                    }
-                    break;
-            }
-            return isType;
-        }
-
         #endregion
     }
 }
