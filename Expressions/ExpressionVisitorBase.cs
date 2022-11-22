@@ -57,8 +57,16 @@ namespace Simple.Elasticsearch.Expressions
                     case ExpressionType.MemberAccess:
                         MemberExpression member = (MemberExpression)node.Expression;
                         ConstantExpression constant = (ConstantExpression)member.Expression;
-                        var model = ((FieldInfo)member.Member).GetValue(constant.Value);
-                        _value.Push(model.GetType().GetProperty(node.Member.Name).GetValue(model));
+                        if (member.Member.MemberType == MemberTypes.Property)
+                        {
+                            var model = ((PropertyInfo)member.Member).GetValue(constant.Value);
+                            _value.Push(model.GetType().GetProperty(node.Member.Name).GetValue(model));
+                        }
+                        else
+                        {
+                            var model = ((FieldInfo)member.Member).GetValue(constant.Value);
+                            _value.Push(model.GetType().GetProperty(node.Member.Name).GetValue(model));
+                        }
                         break;
                     case ExpressionType.Constant:
                         this.VisitConstant((ConstantExpression)node.Expression, node.Member);
