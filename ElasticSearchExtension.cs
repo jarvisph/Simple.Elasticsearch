@@ -1223,7 +1223,7 @@ namespace Simple.Elasticsearch
         {
             total = 0;
             string indexname = type.GetIndexName();
-            var response = client.Search<TDocument>(s => s.Index(indexname).Query(q => query).Size(size).From((page - 1) * size).Sort(s => sort));
+            var response = client.Search<TDocument>(s => s.TrackTotalHits(true).Index(indexname).Query(q => query).Size(size).From((page - 1) * size).Sort(s => sort));
             if (!response.IsValid) throw new ElasticSearchException(response.DebugInformation);
             total = response.Total;
             return response.Documents;
