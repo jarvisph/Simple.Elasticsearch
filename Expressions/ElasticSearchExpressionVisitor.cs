@@ -192,18 +192,26 @@ namespace Simple.Elasticsearch.Expressions
                         }
                         else
                         {
-                            switch (node.Method.Name)
+                            if (field.Type.BaseType.Name == "Array" && node.Method.Name == "Contains")
                             {
-                                case "Contains":
-                                    _query.Push(new QueryContainerDescriptor<TDocument>().Wildcard(field, $"*{value}*"));
-                                    break;
-                                case "StartsWith":
-                                    _query.Push(new QueryContainerDescriptor<TDocument>().Wildcard(field, $"{value}*"));
-                                    break;
-                                case "EndsWith":
-                                    _query.Push(new QueryContainerDescriptor<TDocument>().Wildcard(field, $"*{value}"));
-                                    break;
+                                _query.Push(new QueryContainerDescriptor<TDocument>().Bool(b => b.Must(m => m.Terms(t => t.Field(field).Terms(value)))));
                             }
+                            else
+                            {
+                                switch (node.Method.Name)
+                                {
+                                    case "Contains":
+                                        _query.Push(new QueryContainerDescriptor<TDocument>().Wildcard(field, $"*{value}*"));
+                                        break;
+                                    case "StartsWith":
+                                        _query.Push(new QueryContainerDescriptor<TDocument>().Wildcard(field, $"{value}*"));
+                                        break;
+                                    case "EndsWith":
+                                        _query.Push(new QueryContainerDescriptor<TDocument>().Wildcard(field, $"*{value}"));
+                                        break;
+                                }
+                            }
+
                         }
                     }
                     break;

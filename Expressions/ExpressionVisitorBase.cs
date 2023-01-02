@@ -57,15 +57,43 @@ namespace Simple.Elasticsearch.Expressions
                     case ExpressionType.MemberAccess:
                         MemberExpression member = (MemberExpression)node.Expression;
                         ConstantExpression constant = (ConstantExpression)member.Expression;
-                        if (member.Member.MemberType == MemberTypes.Property)
+                        switch (member.Member.MemberType)
                         {
-                            var model = ((PropertyInfo)member.Member).GetValue(constant.Value);
-                            _value.Push(model.GetType().GetProperty(node.Member.Name).GetValue(model));
-                        }
-                        else
-                        {
-                            var model = ((FieldInfo)member.Member).GetValue(constant.Value);
-                            _value.Push(model.GetType().GetProperty(node.Member.Name).GetValue(model));
+                            case MemberTypes.Constructor:
+                                break;
+                            case MemberTypes.Event:
+                                break;
+                            case MemberTypes.Field:
+                                {
+                                    FieldInfo field = ((FieldInfo)member.Member);
+                                    if (field.FieldType.BaseType.Name == "ValueType")
+                                    {
+                                        object model = field.GetValue(constant.Value);
+                                        _value.Push(model);
+                                    }
+                                    else
+                                    {
+                                        var model = field.GetValue(constant.Value);
+                                        _value.Push(model.GetType().GetProperty(node.Member.Name).GetValue(model));
+                                    }
+                                }
+                                break;
+                            case MemberTypes.Method:
+                                break;
+                            case MemberTypes.Property:
+                                {
+                                    var model = ((PropertyInfo)member.Member).GetValue(constant.Value);
+                                    _value.Push(model.GetType().GetProperty(node.Member.Name).GetValue(model));
+                                }
+                                break;
+                            case MemberTypes.TypeInfo:
+                                break;
+                            case MemberTypes.Custom:
+                                break;
+                            case MemberTypes.NestedType:
+                                break;
+                            case MemberTypes.All:
+                                break;
                         }
                         break;
                     case ExpressionType.Constant:
