@@ -285,23 +285,23 @@ namespace Simple.Elasticsearch.Expressions
             {
                 case ExpressionType.Equal:
                     {
-                        var member = (MemberExpression)field;
-                        var property = ((PropertyInfo)member.Member).PropertyType;
-                        switch (property.Name)
-                        {
-                            case "String":
-                            case "Guid":
-                                {
-                                    _query.Push(new QueryContainerDescriptor<TDocument>().Term(t => t.Field($"{member.Member.Name}.keyword").Value(value)));
-                                }
-                                break;
-                            default:
-                                {
-                                    _query.Push(new QueryContainerDescriptor<TDocument>().Term(t => t.Field(field).Value(value)));
-                                }
-                                break;
-                        }
-
+                        //var member = (MemberExpression)field;
+                        //var property = ((PropertyInfo)member.Member).PropertyType;
+                        //switch (property.Name)
+                        //{
+                        //    case "String":
+                        //    case "Guid":
+                        //        {
+                        //            _query.Push(new QueryContainerDescriptor<TDocument>().Term(t => t.Field($"{member.Member.Name}.keyword").Value(value)));
+                        //        }
+                        //        break;
+                        //    default:
+                        //        {
+                        //            _query.Push(new QueryContainerDescriptor<TDocument>().Term(t => t.Field(field).Value(value)));
+                        //        }
+                        //        break;
+                        //}
+                        _query.Push(new QueryContainerDescriptor<TDocument>().Term(t => t.Field(field).Value(value)));
                     }
                     break;
                 case ExpressionType.GreaterThan:
