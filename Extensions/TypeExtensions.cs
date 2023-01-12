@@ -154,6 +154,12 @@ namespace Simple.Core.Extensions
                                         }
                                     }
                                     break;
+                                default:
+                                    if (type.IsEnum)
+                                    {
+                                        defaultValue = Enum.Parse(type, val);
+                                    }
+                                    break;
 
                             }
                         }
