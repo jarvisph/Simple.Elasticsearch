@@ -8,7 +8,7 @@ using System.Text.RegularExpressions;
 
 namespace Simple.Core.Extensions
 {
-    public static class StringExtensions
+    internal static class StringExtensions
     {
         /// <summary>
         /// 如果不以字符结尾，则在给定字符串的结尾添加一个字符

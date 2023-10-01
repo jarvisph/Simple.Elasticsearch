@@ -6,7 +6,7 @@ using System.Reflection;
 
 namespace Simple.Core.Extensions
 {
-    public static class EnumExtensions
+    internal static class EnumExtensions
     {
         /// <summary>
         /// String转换枚举

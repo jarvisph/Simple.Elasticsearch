@@ -2,7 +2,7 @@
 
 namespace Simple.Core.Extensions
 {
-    public static class DateTimeExtensions
+    internal static class DateTimeExtensions
     {
         public static DateTime Max(this DateTime time1, DateTime time2 = default)
         {

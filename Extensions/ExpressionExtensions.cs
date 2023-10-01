@@ -6,7 +6,7 @@ using System.Reflection;
 
 namespace Simple.Core.Extensions
 {
-    public static class ExpressionExtensions
+    internal static class ExpressionExtensions
     {
         /// <summary>
         /// 获取Experssion字段名

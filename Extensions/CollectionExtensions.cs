@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 namespace Simple.Core.Extensions
 {
-    public static class CollectionExtensions
+    internal static class CollectionExtensions
     {
         /// <summary>
         /// 是否为空

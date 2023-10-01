@@ -4,7 +4,7 @@ using System.Globalization;
 
 namespace Simple.Core.Extensions
 {
-    public static class TypeExtensions
+    internal static class TypeExtensions
     {
         public static object GetDefaultValue(this object value, Type type)
         {
@@ -21,36 +21,22 @@ namespace Simple.Core.Extensions
         /// <returns></returns>
         public static object GetDefaultValue(this Type type)
         {
-            object value = null;
-            switch (type.Name)
+            object value = type.Name switch
             {
-                case "Int16":
-                case "Int32":
-                case "Int64":
-                case "Double":
-                case "Decimal":
-                case "Single":
-                    value = 0;
-                    break;
-                case "Boolean":
-                    value = false;
-                    break;
-                case "DateTime":
-                    value = Convert.ToDateTime("1900-1-1");
-                    break;
-                case "String[]":
-                case "Int16[]":
-                case "Int32[]":
-                case "Int64[]":
-                case "Double[]":
-                case "Decimal[]":
-                case "Single[]":
-                    value = Array.CreateInstance(type, 0);
-                    break;
-                case "String":
-                    value = string.Empty;
-                    break;
-            }
+                nameof(Int16) => (short)0,
+                nameof(Int32) => 0,
+                nameof(Int64) => 0L,
+                nameof(Double) => 0D,
+                nameof(Decimal) => 0M,
+                nameof(Single) => 0F,
+                nameof(Boolean) => false,
+                nameof(DateTime) => new DateTime(1900, 1, 1),
+                "String[]" or "Int16[]" or "Int32[]" or "Int64[]" or "Double[]" or "Decimal[]" or "Single[]" => Array.CreateInstance(type, 0),
+                nameof(Guid) => Guid.Empty,
+                nameof(String) => string.Empty,
+                _ => throw new NotSupportedException(type.Name)
+            };
+
             return value;
         }
         /// <summary>

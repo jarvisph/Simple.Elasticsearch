@@ -6,7 +6,7 @@ using System.Reflection;
 
 namespace Simple.Core.Extensions
 {
-    public static class ObjectExtensions
+    internal static class ObjectExtensions
     {
         /// <summary>
         /// 将给定对象转换为不同类型
